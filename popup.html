@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LinkedIn Email Collector</title>
+  <link rel="stylesheet" href="assets/css/popup.css" />
+</head>
+
+<body>
+  <div class="container">
+    <!-- Header with Action Buttons -->
+    <div class="header">
+      <h2>LinkedIn Email Collector</h2>
+      <div class="header-actions">
+        <button id="historyButton" class="icon-button" title="View History">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </button>
+        <button id="settingsButton" class="icon-button" title="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 1v6m0 6v6m9-9h-6m-6 0H3"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main View -->
+    <div id="mainView" class="view">
+      <div class="form-group">
+        <label for="keywords">Search Keywords (comma-separated)</label>
+        <input
+          type="text"
+          id="keywords"
+          placeholder="python, mumbai, hiring"
+        />
+        <div class="input-hint">Separate keywords with commas. We'll combine them automatically.</div>
+      </div>
+
+      <div class="form-group">
+        <label for="scrollCount">Number of Scrolls</label>
+        <input type="number" id="scrollCount" value="20" min="1" max="200" />
+      </div>
+
+      <div class="form-group">
+        <label for="excludeKeywords">Exclude Emails Containing</label>
+        <input
+          type="text"
+          id="excludeKeywords"
+          placeholder="e.g. current-employer.com, exclude.com"
+        />
+      </div>
+
+      <div class="form-group checkbox">
+        <label>
+          <input type="checkbox" id="includeUnique" checked />
+          Collect Only Unique Emails (across sessions)
+        </label>
+      </div>
+
+      <button id="collectButton" class="primary-button">Check LinkedIn Page</button>
+
+      <div id="statusText" class="status"></div>
+
+      <div id="resultContainer" class="result-container hidden">
+        <div class="result-header">
+          <div id="emailCount" class="email-count"></div>
+          <button id="copyButton" class="copy-button">Copy All</button>
+        </div>
+        <div id="emailList" class="email-list"></div>
+      </div>
+    </div>
+
+    <!-- History View -->
+    <div id="historyView" class="view hidden">
+      <div class="view-header">
+        <button id="backFromHistory" class="back-button">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          Back
+        </button>
+        <h3>Collection History</h3>
+      </div>
+      
+      <div id="historyList" class="history-list"></div>
+      <div id="emptyHistory" class="empty-state hidden">
+        <p>No collection history yet. Start collecting emails to see them here.</p>
+      </div>
+    </div>
+
+    <!-- Settings View -->
+    <div id="settingsView" class="view hidden">
+      <div class="view-header">
+        <button id="backFromSettings" class="back-button">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          Back
+        </button>
+        <h3>Settings</h3>
+      </div>
+
+      <div class="settings-content">
+        <div class="setting-group">
+          <label class="setting-label">Theme</label>
+          <select id="themeSelect" class="setting-select">
+            <option value="system">System Default</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">Storage Usage</label>
+          <div class="storage-info">
+            <div id="storageUsage" class="storage-text">Calculating...</div>
+            <button id="clearStorageButton" class="secondary-button">Clear All Data</button>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">Auto-scroll Speed</label>
+          <select id="scrollSpeedSelect" class="setting-select">
+            <option value="1000">Fast (1s)</option>
+            <option value="2000" selected>Normal (2s)</option>
+            <option value="3000">Slow (3s)</option>
+          </select>
+        </div>
+
+        <div class="setting-group">
+          <div class="checkbox-setting">
+            <input type="checkbox" id="autoNavigate" checked />
+            <label for="autoNavigate">Auto-navigate to LinkedIn search if not on search page</label>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <div class="checkbox-setting">
+            <input type="checkbox" id="showNotifications" checked />
+            <label for="showNotifications">Show status notifications</label>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">About</label>
+          <div class="about-info">
+            <p><strong>Version:</strong> 2.1.0</p>
+            <p><strong>Description:</strong> Advanced LinkedIn email collector with history tracking and customizable settings.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/js/popup.js"></script>
+</body>
+</html>
