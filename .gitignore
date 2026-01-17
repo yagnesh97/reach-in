@@ -1,0 +1,43 @@
+# =========================
+# OS / Editor files
+# =========================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+
+# =========================
+# IDEs
+# =========================
+.vscode/
+.idea/
+*.iml
+
+# =========================
+# Logs
+# =========================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# Build / temp artifacts
+# =========================
+dist/
+build/
+out/
+
+# =========================
+# Chrome Extension
+# =========================
+*.crx
+*.pem
+
+# =========================
+# Environment files
+# =========================
+.env
+.env.local
+.env.*.local
