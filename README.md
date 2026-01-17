@@ -1,3 +1,9 @@
+![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-blue?logo=google-chrome)
+![Manifest V3](https://img.shields.io/badge/Manifest-V3-green)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow)
+![Privacy Friendly](https://img.shields.io/badge/Privacy-Local%20Only-success)
+![No Tracking](https://img.shields.io/badge/Tracking-None-brightgreen)
+
 # ReachIn
 
 ReachIn is a Chrome extension that collects **publicly visible email addresses** from LinkedIn search result pages.  
