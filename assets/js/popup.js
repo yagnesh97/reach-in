@@ -682,17 +682,16 @@ document.addEventListener("DOMContentLoaded", () => {
         </button>
       </div>
       <div class="history-emails-container hidden" id="${emailsListId}">
-        <div class="history-emails-list">${item.emails.join("\n")}</div>
+        <div class="history-emails-list"></div>
         <div class="history-emails-actions">
-          <button class="history-copy-btn" data-id="${
-            item.id
-          }">Copy All</button>
-          <button class="history-delete-btn" data-id="${
-            item.id
-          }">Delete</button>
+          <button class="history-copy-btn" data-id="${item.id}">Copy All</button>
+          <button class="history-delete-btn" data-id="${item.id}">Delete</button>
         </div>
       </div>
     `;
+
+    div.querySelector(".history-emails-list").textContent =
+      item.emails.join("\n");
 
     div.querySelector(".history-toggle-btn").addEventListener("click", (e) => {
       const emailsContainer = document.getElementById(emailsListId);

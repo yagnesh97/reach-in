@@ -142,35 +142,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   );
 });
 
-// Keep service worker alive
-chrome.runtime.onConnect.addListener((port) => {
-  console.log("Connection established");
-
-  port.onDisconnect.addListener(() => {
-    console.log("Connection disconnected");
-  });
-});
-
-// Maintain state across extension lifecycle
-let keepAliveInterval;
-
-function keepAlive() {
-  if (keepAliveInterval) {
-    clearInterval(keepAliveInterval);
-  }
-
-  keepAliveInterval = setInterval(() => {
-    chrome.storage.local.get(["collectionState"], (data) => {
-      // Just accessing storage keeps the service worker alive
-      if (data.collectionState === "collecting") {
-        console.log("Collection in progress...");
-      }
-    });
-  }, 20000); // Every 20 seconds
-}
-
-keepAlive();
-
 // Listen for storage changes to sync state
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === "local") {
