@@ -87,7 +87,7 @@ Users are responsible for ensuring their usage complies with LinkedIn’s terms 
 
 ## 📄 License
 
-MIT License
+[MIT LICENSE](./LICENSE)
 
 ---
 
