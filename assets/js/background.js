@@ -2,7 +2,7 @@
 
 // Listen for extension installation
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("LinkedIn Email Collector installed");
+  console.log("ReachIn installed");
 
   // Initialize default settings
   chrome.storage.local.get(

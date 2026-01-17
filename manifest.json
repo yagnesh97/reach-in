@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "LinkedIn Email Collector",
+  "name": "ReachIn",
   "version": "2.1.0",
-  "description": "Collect emails from LinkedIn search results with advanced features",
+  "description": "ReachIn is a Chrome extension that collects publicly available email addresses from LinkedIn search result pages.",
   "permissions": ["storage", "tabs", "activeTab", "scripting"],
   "action": {
     "default_popup": "popup.html"
