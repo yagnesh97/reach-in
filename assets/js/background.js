@@ -1,4 +1,5 @@
 // background.js - Service worker for maintaining state
+importScripts("outreach-templates.js");
 
 // Listen for extension installation
 chrome.runtime.onInstalled.addListener(() => {
@@ -6,7 +7,15 @@ chrome.runtime.onInstalled.addListener(() => {
 
   // Initialize default settings
   chrome.storage.local.get(
-    ["theme", "scrollSpeed", "autoNavigate", "showNotifications"],
+    [
+      "theme",
+      "scrollSpeed",
+      "autoNavigate",
+      "outreachTemplate",
+      "outreachTemplates",
+      "preferredMailClient",
+      "includeUnique",
+    ],
     (data) => {
       if (!data.theme) {
         chrome.storage.local.set({ theme: "system" });
@@ -17,8 +26,19 @@ chrome.runtime.onInstalled.addListener(() => {
       if (data.autoNavigate === undefined) {
         chrome.storage.local.set({ autoNavigate: true });
       }
-      if (data.showNotifications === undefined) {
-        chrome.storage.local.set({ showNotifications: true });
+      if (data.includeUnique === undefined) {
+        chrome.storage.local.set({ includeUnique: true });
+      }
+      if (!data.preferredMailClient) {
+        chrome.storage.local.set({ preferredMailClient: "gmail" });
+      }
+      if (!data.outreachTemplate) {
+        chrome.storage.local.set({ outreachTemplate: "jobApplication" });
+      }
+      if (!data.outreachTemplates || !data.outreachTemplates.length) {
+        chrome.storage.local.set({
+          outreachTemplates: DEFAULT_OUTREACH_TEMPLATES,
+        });
       }
     }
   );

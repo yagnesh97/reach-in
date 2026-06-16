@@ -1,0 +1,36 @@
+---
+description: Privacy and local-only data processing rules
+alwaysApply: true
+---
+
+# Privacy Rules
+
+## Local-Only Processing
+
+- All email extraction happens in the content script on the user's device
+- No `fetch`, XHR, WebSocket, or external API calls
+- No third-party libraries or CDN scripts
+
+## No Tracking
+
+- No analytics SDKs (Google Analytics, Mixpanel, etc.)
+- No error reporting services (Sentry, etc.)
+- No fingerprinting or device identification
+
+## Data Collection
+
+- Collection starts only on explicit user action (Collect button)
+- Collect only publicly visible data from LinkedIn search pages
+- Store data in `chrome.storage.local` only
+
+## User Control
+
+- Users can view, copy, and delete collected data
+- "Clear All Data" must remove all storage keys
+- Document any new data collection in `docs/STORAGE.md` and `PRIVACY.md`
+
+## Chrome Web Store
+
+- Maintain accurate permission justifications
+- Keep `PRIVACY.md` in sync with actual data handling
+- Single purpose: email collection from LinkedIn search results

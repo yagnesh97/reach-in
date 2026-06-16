@@ -1,0 +1,43 @@
+---
+description: JavaScript coding standards for ReachIn
+globs: assets/js/**
+alwaysApply: false
+---
+
+# JavaScript Standards
+
+## Conventions
+
+- Vanilla JS only — no npm dependencies or external libraries
+- Use `const` by default, `let` when reassignment needed, never `var`
+- Named functions for module logic; arrow functions for callbacks
+- Chrome APIs use callback style (matching existing codebase)
+
+## Content Script
+
+```javascript
+// ✅ Required pattern
+(function () {
+  if (window.__linkedinEmailCollectorInitialized) return;
+  window.__linkedinEmailCollectorInitialized = true;
+  // ...
+})();
+```
+
+## Async Messages
+
+```javascript
+// ✅ Return true for async sendResponse
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "myAction") {
+    doWork().then((result) => sendResponse(result));
+    return true;
+  }
+});
+```
+
+## Error Handling
+
+- Check `chrome.runtime.lastError` after `sendMessage`, `executeScript`, `tabs.get`
+- Wrap DOM operations in try/catch when elements may be missing
+- User-facing errors via `updateStatus()` in popup, not `alert()`

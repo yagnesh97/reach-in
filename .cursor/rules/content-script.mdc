@@ -1,0 +1,38 @@
+---
+description: Content script and LinkedIn DOM interaction rules
+globs: assets/js/content.js
+alwaysApply: false
+---
+
+# Content Script Rules
+
+## DOM Interaction
+
+- Only modify LinkedIn DOM on user-initiated actions (search update, see-more clicks)
+- Do not inject CSS into LinkedIn pages
+- Mark clicked buttons with `data-clicked="true"` to prevent duplicate clicks
+- Use `textContent` over `innerHTML` when reading page text
+
+## Selectors
+
+Centralize new selectors at the top of the file. Current selectors:
+
+- Search: `.search-global-typeahead__input`
+- Expand: `button.see-more`, `button[aria-label*="see more"]`
+- Extract: `a[href^="mailto:"]`, `document.body.innerText`
+
+Update `docs/CONTENT_SCRIPT.md` when adding or changing selectors.
+
+## Extraction
+
+- Normalize emails to lowercase before storage
+- Validate with `isValidEmail()` before adding to results
+- Apply `shouldExclude()` filter before returning
+- Sort results alphabetically
+
+## Scroll and Extract
+
+- Scroll interval controlled by `scrollSpeed` (ms)
+- Scroll target: `main` element, fallback `document.documentElement`
+- Wait 2000ms after final scroll before extraction
+- Persist `cachedEmails` only when `includeUnique` is true

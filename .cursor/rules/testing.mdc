@@ -1,0 +1,46 @@
+---
+description: Manual testing standards for ReachIn
+alwaysApply: false
+---
+
+# Testing Standards
+
+ReachIn has no automated tests. All testing is manual.
+
+## Before Submitting Changes
+
+Test all four navigation cases:
+
+1. **Not on LinkedIn** — opens new tab with search URL
+2. **Search page, wrong keywords** — updates search or navigates
+3. **LinkedIn, not search page** — navigates to content search
+4. **Correct search page** — collects immediately
+
+## Collection Testing
+
+- Verify scrolling and see-more expansion on live LinkedIn
+- Test exclude keywords filter
+- Test unique email mode (collect twice, verify dedup)
+- Test empty results handling
+- Test copy to clipboard
+
+## Regression Checklist
+
+- [ ] Popup opens without console errors
+- [ ] Theme switching works (light/dark/system)
+- [ ] History save, expand, copy, delete
+- [ ] Settings persist across popup close/reopen
+- [ ] Clear All Data removes all storage
+- [ ] Tab switch hides/shows results correctly
+
+## LinkedIn Compatibility
+
+- Test on `linkedin.com/search/results/content` page
+- Verify selectors still match after LinkedIn UI changes
+- Check content script appears in page DevTools → Sources
+
+## After Content Script Changes
+
+1. Reload extension at `chrome://extensions`
+2. Refresh LinkedIn tab
+3. Re-run collection test

@@ -1,0 +1,31 @@
+---
+description: Manifest V3 architecture boundaries for ReachIn extension
+globs: "**/*.{js,json,html}"
+alwaysApply: false
+---
+
+# Chrome Extension Architecture (MV3)
+
+## Component Boundaries
+
+- **Popup** (`popup.js`): UI, orchestration, storage reads/writes, tab navigation. Never touches LinkedIn DOM.
+- **Content script** (`content.js`): LinkedIn DOM only — scroll, expand, extract. Never renders popup UI.
+- **Service worker** (`background.js`): Lifecycle events, tab cleanup, popup auto-open. No DOM access.
+
+## Rules
+
+- No external network requests (`fetch`, XHR, WebSocket) in any module
+- Cross-context communication via `chrome.runtime.sendMessage` or `chrome.tabs.sendMessage` only
+- Content script uses IIFE with `__linkedinEmailCollectorInitialized` guard
+- Settings live in popup Settings view — no separate options page
+- New features must declare which execution context owns the logic
+
+## Message Flow
+
+```
+popup → tabs.sendMessage → content (DOM operations)
+popup → runtime.sendMessage → background (tab lifecycle)
+content → sendResponse → popup (results only)
+```
+
+Do not add background → content direct messaging without documenting in `docs/ARCHITECTURE.md`.

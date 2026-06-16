@@ -1,12 +1,12 @@
 // popup.js
 document.addEventListener("DOMContentLoaded", () => {
-  // Elements
   const collectButton = document.getElementById("collectButton");
   const copyButton = document.getElementById("copyButton");
   const historyButton = document.getElementById("historyButton");
   const settingsButton = document.getElementById("settingsButton");
   const backFromHistory = document.getElementById("backFromHistory");
   const backFromSettings = document.getElementById("backFromSettings");
+  const appTitle = document.getElementById("appTitle");
 
   const keywordsInput = document.getElementById("keywords");
   const scrollCountInput = document.getElementById("scrollCount");
@@ -17,6 +17,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const emailList = document.getElementById("emailList");
   const emailCount = document.getElementById("emailCount");
   const statusText = document.getElementById("statusText");
+  const scrollProgressContainer = document.getElementById("scrollProgressContainer");
+  const scrollProgressFill = document.getElementById("scrollProgressFill");
+  const scrollProgressText = document.getElementById("scrollProgressText");
+
+  const outreachContainer = document.getElementById("outreachContainer");
+  const outreachTemplateSelect = document.getElementById("outreachTemplate");
+  const outreachSubjectInput = document.getElementById("outreachSubject");
+  const outreachBodyInput = document.getElementById("outreachBody");
+  const openDraftButton = document.getElementById("openDraftButton");
 
   const mainView = document.getElementById("mainView");
   const historyView = document.getElementById("historyView");
@@ -24,20 +33,33 @@ document.addEventListener("DOMContentLoaded", () => {
   const historyList = document.getElementById("historyList");
   const emptyHistory = document.getElementById("emptyHistory");
 
-  // Settings elements
   const themeSelect = document.getElementById("themeSelect");
   const scrollSpeedSelect = document.getElementById("scrollSpeedSelect");
   const autoNavigate = document.getElementById("autoNavigate");
-  const showNotifications = document.getElementById("showNotifications");
+  const preferredMailClientSelect = document.getElementById("preferredMailClient");
+  const defaultTemplateSelect = document.getElementById("defaultTemplateSelect");
   const storageUsage = document.getElementById("storageUsage");
   const clearStorageButton = document.getElementById("clearStorageButton");
+  const templateManageSelect = document.getElementById("templateManageSelect");
+  const templateNameInput = document.getElementById("templateNameInput");
+  const templateSubjectInput = document.getElementById("templateSubjectInput");
+  const templateBodyInput = document.getElementById("templateBodyInput");
+  const saveTemplateButton = document.getElementById("saveTemplateButton");
+  const addTemplateButton = document.getElementById("addTemplateButton");
+  const deleteTemplateButton = document.getElementById("deleteTemplateButton");
+  const resetTemplateButton = document.getElementById("resetTemplateButton");
+  const unsavedIndicator = document.getElementById("unsavedIndicator");
 
   let collectedEmails = [];
   let currentTabUrl = "";
   let currentTabId = null;
   let placeholderIndex = 0;
+  let generatedSubject = "";
+  let generatedBody = "";
+  let outreachTemplates = [];
+  let preferredMailClient = MAIL_CLIENTS.gmail;
+  let templateEditorBaseline = null;
 
-  // Placeholder examples for keywords
   const placeholders = [
     "python, mumbai, hiring",
     "data scientist, remote, USA",
@@ -49,31 +71,55 @@ document.addEventListener("DOMContentLoaded", () => {
     "engineer, machine learning, PhD",
   ];
 
-  // Initialize
   init();
 
   function init() {
+    initStaticIcons();
     loadSettings();
-    resetStateOnOpen();
-    checkCurrentTab();
-    startPlaceholderRotation();
-    setupEventListeners();
+    loadOutreachTemplatesAndRefreshUI(() => {
+      resetStateOnOpen();
+      checkCurrentTab();
+      startPlaceholderRotation();
+      setupEventListeners();
+      setupStorageListener();
+    });
+  }
+
+  function initStaticIcons() {
+    document.getElementById("appTitleIcon").appendChild(renderIcon(Icons.home));
+    historyButton.appendChild(renderIcon(Icons.history));
+    settingsButton.appendChild(renderIcon(Icons.settings));
+    backFromHistory.appendChild(renderIcon(Icons.back));
+    backFromSettings.appendChild(renderIcon(Icons.back));
+    copyButton.appendChild(renderIcon(Icons.copy));
+    document.getElementById("openDraftIcon").appendChild(renderIcon(Icons.mail));
+    document.getElementById("emptyHistoryIcon").appendChild(renderIcon(Icons.history));
+    document.getElementById("saveTemplateIcon").appendChild(renderIcon(Icons.save));
+    document.getElementById("addTemplateIcon").appendChild(renderIcon(Icons.plus));
+    document.getElementById("deleteTemplateIcon").appendChild(renderIcon(Icons.delete));
+    document.getElementById("resetTemplateIcon").appendChild(renderIcon(Icons.rotateCcw));
+    document.getElementById("clearStorageIcon").appendChild(renderIcon(Icons.delete));
+    document.getElementById("privacyLinkIcon").appendChild(renderIcon(Icons.externalLink));
+    updateOpenDraftButtonLabel();
+  }
+
+  function updateOpenDraftButtonLabel() {
+    const label = getMailClientDraftLabel(preferredMailClient);
+    openDraftButton.setAttribute("aria-label", label);
+    openDraftButton.setAttribute("title", label);
   }
 
   /* =============== RESET STATE =============== */
   function resetStateOnOpen() {
-    // Reset collection state when popup opens
     chrome.storage.local.get(
       ["collectionState", "activeCollectionTabId"],
       (data) => {
-        // If there was an active collection, check if that tab still exists
         if (
           data.collectionState === "collecting" &&
           data.activeCollectionTabId
         ) {
           chrome.tabs.get(data.activeCollectionTabId, (tab) => {
             if (chrome.runtime.lastError || !tab) {
-              // Tab was closed, reset state
               chrome.storage.local.set({
                 collectionState: "idle",
                 statusText: "",
@@ -83,7 +129,6 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           });
         } else {
-          // No active collection, ensure clean state
           chrome.storage.local.set({
             collectionState: "idle",
             activeCollectionTabId: null,
@@ -95,7 +140,6 @@ document.addEventListener("DOMContentLoaded", () => {
     loadState();
   }
 
-  /* =============== PLACEHOLDER ROTATION =============== */
   function startPlaceholderRotation() {
     setInterval(() => {
       if (document.activeElement !== keywordsInput && !keywordsInput.value) {
@@ -108,18 +152,25 @@ document.addEventListener("DOMContentLoaded", () => {
   /* =============== SETTINGS =============== */
   function loadSettings() {
     chrome.storage.local.get(
-      ["theme", "scrollSpeed", "autoNavigate", "showNotifications"],
+      [
+        "theme",
+        "scrollSpeed",
+        "autoNavigate",
+        "includeUnique",
+        "preferredMailClient",
+        "outreachTemplate",
+      ],
       (data) => {
-        const theme = data.theme || "system";
-        const scrollSpeed = data.scrollSpeed || "2000";
-
-        themeSelect.value = theme;
-        scrollSpeedSelect.value = scrollSpeed;
+        themeSelect.value = data.theme || "system";
+        scrollSpeedSelect.value = data.scrollSpeed || "2000";
         autoNavigate.checked = data.autoNavigate !== false;
-        showNotifications.checked = data.showNotifications !== false;
+        includeUniqueCheckbox.checked = data.includeUnique !== false;
+        preferredMailClient = data.preferredMailClient || MAIL_CLIENTS.gmail;
+        preferredMailClientSelect.value = preferredMailClient;
 
-        applyTheme(theme);
+        applyTheme(themeSelect.value);
         calculateStorageUsage();
+        updateOpenDraftButtonLabel();
       }
     );
   }
@@ -141,21 +192,39 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   themeSelect.addEventListener("change", (e) => {
-    const theme = e.target.value;
-    chrome.storage.local.set({ theme });
-    applyTheme(theme);
+    chrome.storage.local.set({ theme: e.target.value });
+    applyTheme(e.target.value);
+    showToast("Settings saved", "success");
   });
 
   scrollSpeedSelect.addEventListener("change", (e) => {
     chrome.storage.local.set({ scrollSpeed: e.target.value });
+    showToast("Settings saved", "success");
   });
 
   autoNavigate.addEventListener("change", (e) => {
     chrome.storage.local.set({ autoNavigate: e.target.checked });
+    showToast("Settings saved", "success");
   });
 
-  showNotifications.addEventListener("change", (e) => {
-    chrome.storage.local.set({ showNotifications: e.target.checked });
+  includeUniqueCheckbox.addEventListener("change", (e) => {
+    chrome.storage.local.set({ includeUnique: e.target.checked });
+    showToast("Settings saved", "success");
+  });
+
+  preferredMailClientSelect.addEventListener("change", (e) => {
+    preferredMailClient = e.target.value;
+    chrome.storage.local.set({ preferredMailClient });
+    updateOpenDraftButtonLabel();
+    showToast("Settings saved", "success");
+  });
+
+  defaultTemplateSelect.addEventListener("change", (e) => {
+    const templateId = e.target.value;
+    chrome.storage.local.set({ outreachTemplate: templateId });
+    outreachTemplateSelect.value = templateId;
+    applySelectedTemplate(true);
+    showToast("Default template updated", "success");
   });
 
   clearStorageButton.addEventListener("click", () => {
@@ -165,9 +234,20 @@ document.addEventListener("DOMContentLoaded", () => {
       )
     ) {
       chrome.storage.local.clear(() => {
-        updateStatus("All data cleared!");
+        chrome.storage.local.set({
+          theme: "system",
+          scrollSpeed: "2000",
+          autoNavigate: true,
+          includeUnique: true,
+          preferredMailClient: MAIL_CLIENTS.gmail,
+          outreachTemplates: DEFAULT_OUTREACH_TEMPLATES,
+          outreachTemplate: "jobApplication",
+        });
+        showToast("All data cleared", "success");
         calculateStorageUsage();
         loadHistory();
+        loadOutreachTemplatesAndRefreshUI();
+        loadSettings();
       });
     }
   });
@@ -182,6 +262,12 @@ document.addEventListener("DOMContentLoaded", () => {
         "collectionState",
         "collectedEmails",
         "activeCollectionTabId",
+        "outreachTemplate",
+        "generatedSubject",
+        "generatedBody",
+        "scrollProgress",
+        "preferredMailClient",
+        "includeUnique",
       ],
       (data) => {
         if (data.keywords) keywordsInput.value = data.keywords;
@@ -189,31 +275,61 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data.excludeKeywords)
           excludeKeywordsInput.value = data.excludeKeywords;
 
-        // Only show collected emails if we're on the same tab where collection happened
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          const activeTab = tabs?.[0];
+        if (data.preferredMailClient) {
+          preferredMailClient = data.preferredMailClient;
+          preferredMailClientSelect.value = preferredMailClient;
+          updateOpenDraftButtonLabel();
+        }
+
+        if (data.includeUnique !== undefined) {
+          includeUniqueCheckbox.checked = data.includeUnique;
+        }
+
+        loadOutreachTemplatesAndRefreshUI(() => {
+          const selectedId = data.outreachTemplate || "jobApplication";
           if (
-            activeTab &&
-            data.collectedEmails?.length &&
-            data.activeCollectionTabId === activeTab.id
+            outreachTemplates.some((template) => template.id === selectedId)
           ) {
-            collectedEmails = data.collectedEmails;
-            displayEmails(collectedEmails);
-          } else {
-            // Different tab, hide results
-            resultContainer.classList.add("hidden");
-            collectedEmails = [];
+            outreachTemplateSelect.value = selectedId;
+            defaultTemplateSelect.value = selectedId;
           }
 
-          if (
-            data.collectionState === "collecting" &&
-            data.activeCollectionTabId === activeTab?.id
-          ) {
-            setButtonState("collecting");
-            updateStatus("Collection in progress...");
-          } else {
-            setButtonState("idle");
+          generatedSubject = data.generatedSubject || "";
+          generatedBody = data.generatedBody || "";
+          outreachSubjectInput.value = generatedSubject;
+          outreachBodyInput.value = generatedBody;
+
+          if (!generatedSubject && !generatedBody) {
+            applySelectedTemplate(false);
           }
+
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const activeTab = tabs?.[0];
+            if (
+              activeTab &&
+              data.collectedEmails?.length &&
+              data.activeCollectionTabId === activeTab.id
+            ) {
+              collectedEmails = data.collectedEmails;
+              displayEmails(collectedEmails);
+            } else {
+              hideResults();
+            }
+
+            if (
+              data.collectionState === "collecting" &&
+              data.activeCollectionTabId === activeTab?.id
+            ) {
+              setButtonState("collecting");
+              if (data.scrollProgress) {
+                showScrollProgress();
+                updateScrollProgress(data.scrollProgress);
+              }
+            } else {
+              setButtonState("idle");
+              hideScrollProgress();
+            }
+          });
         });
       }
     );
@@ -228,7 +344,6 @@ document.addEventListener("DOMContentLoaded", () => {
       currentTabId = tab.id;
       chrome.storage.local.set({ currentTabUrl });
 
-      // Reset status when switching tabs
       chrome.storage.local.get(
         ["activeCollectionTabId", "collectionState"],
         (data) => {
@@ -265,9 +380,6 @@ document.addEventListener("DOMContentLoaded", () => {
         collectButton.disabled = true;
         break;
       case "completed":
-        updateButtonBasedOnUrl(currentTabUrl);
-        collectButton.disabled = false;
-        break;
       case "idle":
       default:
         updateButtonBasedOnUrl(currentTabUrl);
@@ -276,7 +388,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  /* =============== KEYWORD PROCESSING =============== */
   function processKeywords(input) {
     const keywords = input
       .split(",")
@@ -306,6 +417,25 @@ document.addEventListener("DOMContentLoaded", () => {
     settingsButton.addEventListener("click", () => switchView("settings"));
     backFromHistory.addEventListener("click", () => switchView("main"));
     backFromSettings.addEventListener("click", () => switchView("main"));
+    appTitle.addEventListener("click", () => switchView("main"));
+    openDraftButton.addEventListener("click", openMailDraft);
+    outreachTemplateSelect.addEventListener("change", () =>
+      applySelectedTemplate(true)
+    );
+    outreachSubjectInput.addEventListener("input", saveOutreachEdits);
+    outreachBodyInput.addEventListener("input", saveOutreachEdits);
+    templateManageSelect.addEventListener("change", () => {
+      loadTemplateIntoEditor(templateManageSelect.value);
+      updateTemplateActionButtons();
+      resetTemplateEditorBaseline();
+    });
+    templateNameInput.addEventListener("input", updateDirtyState);
+    templateSubjectInput.addEventListener("input", updateDirtyState);
+    templateBodyInput.addEventListener("input", updateDirtyState);
+    saveTemplateButton.addEventListener("click", saveTemplate);
+    addTemplateButton.addEventListener("click", addNewTemplate);
+    deleteTemplateButton.addEventListener("click", deleteTemplate);
+    resetTemplateButton.addEventListener("click", resetTemplateToDefault);
   }
 
   /* =============== COLLECT EMAILS =============== */
@@ -319,8 +449,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // Hide/reset previous results when starting new collection
-    resultContainer.classList.add("hidden");
+    hideResults();
     collectedEmails = [];
     chrome.storage.local.set({ collectedEmails: [] });
 
@@ -348,29 +477,22 @@ document.addEventListener("DOMContentLoaded", () => {
         );
         const keywordsMatch = currentSearchKeywords === processedKeywords;
 
-        // Case 1: Not on LinkedIn at all - open in new tab
         if (!url.includes("linkedin.com")) {
           if (shouldAutoNavigate) {
             chrome.tabs.create({ url: searchUrl, active: true }, (newTab) => {
-              // Signal background script to open popup when ready
               chrome.runtime.sendMessage({
                 action: "openPopupOnTabReady",
                 tabId: newTab.id,
               });
             });
-            updateStatus("Opening LinkedIn in new tab...");
           } else {
-            updateStatus("Please navigate to LinkedIn manually.");
+            updateStatus("LinkedIn page required. Please navigate manually.");
           }
           return;
         }
 
-        // Case 2: On LinkedIn search but keywords don't match - try using search input first
         if (isOnLinkedInSearch && !keywordsMatch) {
           if (shouldAutoNavigate) {
-            updateStatus("Updating search...");
-
-            // Try to use LinkedIn's search input
             chrome.tabs.sendMessage(
               currentTab.id,
               {
@@ -383,9 +505,6 @@ document.addEventListener("DOMContentLoaded", () => {
                   !response ||
                   !response.success
                 ) {
-                  // Fallback to URL navigation
-                  updateStatus("Navigating to new search page...");
-
                   chrome.tabs.update(currentTab.id, { url: searchUrl }, () => {
                     const listener = (tabId, changeInfo) => {
                       if (
@@ -393,10 +512,6 @@ document.addEventListener("DOMContentLoaded", () => {
                         changeInfo.status === "complete"
                       ) {
                         chrome.tabs.onUpdated.removeListener(listener);
-                        updateStatus(
-                          "Search page loaded. Click 'Collect Emails' to start."
-                        );
-
                         setTimeout(() => {
                           chrome.tabs.query(
                             { active: true, currentWindow: true },
@@ -411,26 +526,17 @@ document.addEventListener("DOMContentLoaded", () => {
                       }
                     };
                     chrome.tabs.onUpdated.addListener(listener);
-
                     setTimeout(() => {
                       chrome.tabs.onUpdated.removeListener(listener);
                     }, 15000);
                   });
                 } else {
-                  // Search input method succeeded - wait for page to update and auto-collect
-                  updateStatus(
-                    "Search updated. Waiting for results to load..."
-                  );
-
-                  // Wait for the search to complete
                   const listener = (tabId, changeInfo) => {
                     if (
                       tabId === currentTab.id &&
                       changeInfo.status === "complete"
                     ) {
                       chrome.tabs.onUpdated.removeListener(listener);
-
-                      // Wait a bit more for content to render, then auto-start collection
                       setTimeout(() => {
                         chrome.tabs.query(
                           { active: true, currentWindow: true },
@@ -438,9 +544,6 @@ document.addEventListener("DOMContentLoaded", () => {
                             if (newTabs[0]) {
                               currentTabUrl = newTabs[0].url;
                               updateButtonBasedOnUrl(currentTabUrl);
-
-                              // Auto-start collection
-                              updateStatus("Starting email collection...");
                               startEmailCollection(
                                 newTabs[0].id,
                                 scrollCount,
@@ -453,7 +556,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                   };
                   chrome.tabs.onUpdated.addListener(listener);
-
                   setTimeout(() => {
                     chrome.tabs.onUpdated.removeListener(listener);
                   }, 15000);
@@ -466,11 +568,8 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        // Case 3: Not on search page - navigate to search
         if (!isOnLinkedInSearch) {
           if (shouldAutoNavigate) {
-            updateStatus("Navigating to search page...");
-
             chrome.tabs.update(currentTab.id, { url: searchUrl }, () => {
               const listener = (tabId, changeInfo) => {
                 if (
@@ -478,10 +577,6 @@ document.addEventListener("DOMContentLoaded", () => {
                   changeInfo.status === "complete"
                 ) {
                   chrome.tabs.onUpdated.removeListener(listener);
-                  updateStatus(
-                    "Search page loaded. Click 'Collect Emails' to start."
-                  );
-
                   setTimeout(() => {
                     chrome.tabs.query(
                       { active: true, currentWindow: true },
@@ -496,7 +591,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
               };
               chrome.tabs.onUpdated.addListener(listener);
-
               setTimeout(() => {
                 chrome.tabs.onUpdated.removeListener(listener);
               }, 15000);
@@ -507,7 +601,6 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        // Case 4: On correct search page with matching keywords - start collection
         startEmailCollection(currentTab.id, scrollCount, excludeKeywords);
       });
     });
@@ -515,7 +608,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function startEmailCollection(tabId, scrollCount, excludeKeywords) {
     setButtonState("collecting");
-    updateStatus("Starting email collection...");
+    updateStatus("");
+    showScrollProgress();
+    updateScrollProgress({ current: 0, total: scrollCount, phase: "scrolling" });
 
     chrome.storage.local.set({
       collectionState: "collecting",
@@ -530,14 +625,16 @@ document.addEventListener("DOMContentLoaded", () => {
           target: { tabId: tabId },
           files: ["assets/js/content.js"],
         },
-        (injectionResults) => {
+        () => {
           if (chrome.runtime.lastError) {
             updateStatus("Error: " + chrome.runtime.lastError.message);
             setButtonState("idle");
+            hideScrollProgress();
             chrome.storage.local.set({
               collectionState: "idle",
               activeCollectionTabId: null,
             });
+            chrome.storage.local.remove("scrollProgress");
             return;
           }
 
@@ -560,12 +657,16 @@ document.addEventListener("DOMContentLoaded", () => {
                     "Communication error: " + chrome.runtime.lastError.message
                   );
                   setButtonState("idle");
+                  hideScrollProgress();
                   chrome.storage.local.set({
                     collectionState: "idle",
                     activeCollectionTabId: null,
                   });
+                  chrome.storage.local.remove("scrollProgress");
                   return;
                 }
+
+                hideScrollProgress();
 
                 if (response && response.emails && response.emails.length > 0) {
                   collectedEmails = response.emails;
@@ -577,10 +678,7 @@ document.addEventListener("DOMContentLoaded", () => {
                   });
 
                   displayEmails(collectedEmails);
-                  updateStatus(
-                    `Successfully collected ${collectedEmails.length} emails!`
-                  );
-
+                  updateStatus("");
                   saveToHistory(keywordsInput.value.trim(), collectedEmails);
                 } else {
                   updateStatus("No emails found on this page.");
@@ -604,10 +702,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!collectedEmails.length) return;
 
     navigator.clipboard.writeText(collectedEmails.join(", ")).then(() => {
-      updateStatus("✓ Emails copied to clipboard!");
+      setButtonIcon(copyButton, Icons.check);
+      copyButton.classList.add("is-success");
+      showToast("Emails copied", "success");
       setTimeout(() => {
-        updateStatus("");
-      }, 2000);
+        setButtonIcon(copyButton, Icons.copy);
+        copyButton.classList.remove("is-success");
+      }, 1500);
     });
   }
 
@@ -647,8 +748,7 @@ document.addEventListener("DOMContentLoaded", () => {
       historyList.innerHTML = "";
 
       history.forEach((item) => {
-        const historyItem = createHistoryItem(item);
-        historyList.appendChild(historyItem);
+        historyList.appendChild(createHistoryItem(item));
       });
     });
   }
@@ -668,57 +768,95 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const emailsListId = `emails-list-${item.id}`;
 
-    div.innerHTML = `
-      <div class="history-header">
-        <div class="history-info">
-          <div class="history-date">${formattedDate}</div>
-          <div class="history-keywords">${item.keywords}</div>
-          <div class="history-count">${item.count} emails collected</div>
-        </div>
-        <button class="history-toggle-btn" data-id="${item.id}">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="6 9 12 15 18 9"></polyline>
-          </svg>
-        </button>
-      </div>
-      <div class="history-emails-container hidden" id="${emailsListId}">
-        <div class="history-emails-list"></div>
-        <div class="history-emails-actions">
-          <button class="history-copy-btn" data-id="${item.id}">Copy All</button>
-          <button class="history-delete-btn" data-id="${item.id}">Delete</button>
-        </div>
-      </div>
+    const header = document.createElement("div");
+    header.className = "history-header";
+
+    const info = document.createElement("div");
+    info.className = "history-info";
+    info.innerHTML = `
+      <div class="history-date">${formattedDate}</div>
+      <div class="history-keywords">${escapeHtml(item.keywords)}</div>
+      <div class="history-count">${item.count} emails collected</div>
     `;
 
-    div.querySelector(".history-emails-list").textContent =
-      item.emails.join("\n");
+    const toggleBtn = createIconButton(Icons.chevronDown, {
+      label: "Expand emails",
+      className: "btn btn-icon history-toggle-btn",
+    });
+    toggleBtn.dataset.id = item.id;
 
-    div.querySelector(".history-toggle-btn").addEventListener("click", (e) => {
-      const emailsContainer = document.getElementById(emailsListId);
-      const toggleBtn = e.currentTarget;
+    header.appendChild(info);
+    header.appendChild(toggleBtn);
+
+    const emailsContainer = document.createElement("div");
+    emailsContainer.className = "history-emails-container hidden";
+    emailsContainer.id = emailsListId;
+
+    const emailsListEl = document.createElement("div");
+    emailsListEl.className = "history-emails-list";
+    emailsListEl.textContent = item.emails.join("\n");
+
+    const actions = document.createElement("div");
+    actions.className = "history-emails-actions";
+
+    const copyBtn = createIconButton(Icons.copy, {
+      label: "Copy Emails",
+      className: "btn btn-icon btn-success-icon",
+    });
+    copyBtn.dataset.id = item.id;
+
+    const deleteBtn = createIconButton(Icons.delete, {
+      label: "Delete",
+      className: "btn btn-icon btn-danger",
+    });
+    deleteBtn.dataset.id = item.id;
+
+    actions.appendChild(copyBtn);
+    actions.appendChild(deleteBtn);
+    emailsContainer.appendChild(emailsListEl);
+    emailsContainer.appendChild(actions);
+
+    div.appendChild(header);
+    div.appendChild(emailsContainer);
+
+    toggleBtn.addEventListener("click", () => {
       const isHidden = emailsContainer.classList.contains("hidden");
-
       if (isHidden) {
         emailsContainer.classList.remove("hidden");
-        toggleBtn.classList.add("active");
+        toggleBtn.classList.add("is-expanded");
+        toggleBtn.setAttribute("aria-label", "Collapse emails");
+        toggleBtn.setAttribute("title", "Collapse emails");
       } else {
         emailsContainer.classList.add("hidden");
-        toggleBtn.classList.remove("active");
+        toggleBtn.classList.remove("is-expanded");
+        toggleBtn.setAttribute("aria-label", "Expand emails");
+        toggleBtn.setAttribute("title", "Expand emails");
       }
     });
 
-    div.querySelector(".history-copy-btn").addEventListener("click", () => {
+    copyBtn.addEventListener("click", () => {
       navigator.clipboard.writeText(item.emails.join(", ")).then(() => {
-        updateStatus("✓ Emails copied from history!");
-        setTimeout(() => updateStatus(""), 2000);
+        setButtonIcon(copyBtn, Icons.check);
+        copyBtn.classList.add("is-success");
+        showToast("Emails copied", "success");
+        setTimeout(() => {
+          setButtonIcon(copyBtn, Icons.copy);
+          copyBtn.classList.remove("is-success");
+        }, 1500);
       });
     });
 
-    div.querySelector(".history-delete-btn").addEventListener("click", () => {
+    deleteBtn.addEventListener("click", () => {
       deleteHistoryItem(item.id);
     });
 
     return div;
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   function deleteHistoryItem(id) {
@@ -727,6 +865,7 @@ document.addEventListener("DOMContentLoaded", () => {
       history = history.filter((item) => item.id !== id);
       chrome.storage.local.set({ history }, () => {
         loadHistory();
+        showToast("History item deleted", "success");
       });
     });
   }
@@ -745,29 +884,369 @@ document.addEventListener("DOMContentLoaded", () => {
       case "settings":
         settingsView.classList.remove("hidden");
         calculateStorageUsage();
+        loadOutreachTemplatesAndRefreshUI(() => {
+          if (templateManageSelect.value) {
+            loadTemplateIntoEditor(templateManageSelect.value);
+            resetTemplateEditorBaseline();
+          }
+          updateTemplateActionButtons();
+        });
         break;
       case "main":
       default:
         mainView.classList.remove("hidden");
         checkCurrentTab();
+        loadOutreachTemplatesAndRefreshUI();
         break;
     }
+  }
+
+  /* =============== OUTREACH TEMPLATES =============== */
+  function loadOutreachTemplatesAndRefreshUI(callback) {
+    chrome.storage.local.get(["outreachTemplates", "outreachTemplate"], (data) => {
+      outreachTemplates =
+        data.outreachTemplates && data.outreachTemplates.length
+          ? data.outreachTemplates
+          : DEFAULT_OUTREACH_TEMPLATES;
+
+      if (!data.outreachTemplates || !data.outreachTemplates.length) {
+        chrome.storage.local.set({ outreachTemplates });
+      }
+
+      populateOutreachTemplateSelect();
+      populateTemplateManageSelect();
+      populateDefaultTemplateSelect();
+
+      const selectedId = data.outreachTemplate || "jobApplication";
+      if (outreachTemplates.some((t) => t.id === selectedId)) {
+        outreachTemplateSelect.value = selectedId;
+        defaultTemplateSelect.value = selectedId;
+      }
+
+      if (templateManageSelect.options.length && !templateManageSelect.value) {
+        templateManageSelect.value = outreachTemplates[0].id;
+      }
+
+      if (callback) callback();
+    });
+  }
+
+  function populateSelect(select, templates) {
+    select.innerHTML = "";
+    templates.forEach((template) => {
+      const option = document.createElement("option");
+      option.value = template.id;
+      option.textContent = template.name;
+      select.appendChild(option);
+    });
+  }
+
+  function populateOutreachTemplateSelect() {
+    populateSelect(outreachTemplateSelect, outreachTemplates);
+  }
+
+  function populateTemplateManageSelect() {
+    populateSelect(templateManageSelect, outreachTemplates);
+  }
+
+  function populateDefaultTemplateSelect() {
+    populateSelect(defaultTemplateSelect, outreachTemplates);
+  }
+
+  function getTemplateById(id) {
+    return outreachTemplates.find((template) => template.id === id);
+  }
+
+  function applySelectedTemplate(persistTemplate = true) {
+    const templateId = outreachTemplateSelect.value;
+    const template = getTemplateById(templateId);
+    if (!template) return;
+
+    generatedSubject = template.subject;
+    generatedBody = template.body;
+    outreachSubjectInput.value = generatedSubject;
+    outreachBodyInput.value = generatedBody;
+
+    const payload = { generatedSubject, generatedBody };
+    if (persistTemplate) {
+      payload.outreachTemplate = templateId;
+      defaultTemplateSelect.value = templateId;
+    }
+    chrome.storage.local.set(payload);
+  }
+
+  function getEditorValues() {
+    return {
+      name: templateNameInput.value,
+      subject: templateSubjectInput.value,
+      body: templateBodyInput.value,
+    };
+  }
+
+  function resetTemplateEditorBaseline() {
+    templateEditorBaseline = getEditorValues();
+    updateDirtyState();
+  }
+
+  function updateDirtyState() {
+    if (!templateEditorBaseline) {
+      saveTemplateButton.disabled = true;
+      unsavedIndicator.classList.add("hidden");
+      return;
+    }
+
+    const current = getEditorValues();
+    const isDirty =
+      current.name !== templateEditorBaseline.name ||
+      current.subject !== templateEditorBaseline.subject ||
+      current.body !== templateEditorBaseline.body;
+
+    saveTemplateButton.disabled = !isDirty;
+    unsavedIndicator.classList.toggle("hidden", !isDirty);
+  }
+
+  function loadTemplateIntoEditor(templateId) {
+    const template = getTemplateById(templateId);
+    if (!template) return;
+
+    templateNameInput.value = template.name;
+    templateSubjectInput.value = template.subject;
+    templateBodyInput.value = template.body;
+    resetTemplateEditorBaseline();
+  }
+
+  function updateTemplateActionButtons() {
+    const template = getTemplateById(templateManageSelect.value);
+    const isBuiltIn = template?.builtIn === true;
+
+    deleteTemplateButton.disabled = isBuiltIn;
+    deleteTemplateButton.classList.toggle("hidden", isBuiltIn);
+    resetTemplateButton.classList.toggle("hidden", !isBuiltIn);
+  }
+
+  function saveTemplate() {
+    const templateId = templateManageSelect.value;
+    const name = templateNameInput.value.trim();
+    const subject = templateSubjectInput.value.trim();
+    const body = templateBodyInput.value.trim();
+
+    if (!name || !subject || !body) {
+      updateStatus("Template name, subject, and body are required.");
+      return;
+    }
+
+    const index = outreachTemplates.findIndex(
+      (template) => template.id === templateId
+    );
+    if (index === -1) return;
+
+    outreachTemplates[index] = {
+      ...outreachTemplates[index],
+      name,
+      subject,
+      body,
+    };
+
+    chrome.storage.local.set({ outreachTemplates }, () => {
+      populateOutreachTemplateSelect();
+      populateTemplateManageSelect();
+      populateDefaultTemplateSelect();
+      templateManageSelect.value = templateId;
+      updateTemplateActionButtons();
+      resetTemplateEditorBaseline();
+      flashButtonSuccess(saveTemplateButton);
+      showToast("Template saved", "success");
+      updateStatus("");
+    });
+  }
+
+  function addNewTemplate() {
+    const newTemplate = {
+      id: "custom_" + Date.now(),
+      name: "New Template",
+      subject: "",
+      body: "",
+      builtIn: false,
+    };
+
+    outreachTemplates.push(newTemplate);
+
+    chrome.storage.local.set({ outreachTemplates }, () => {
+      populateOutreachTemplateSelect();
+      populateTemplateManageSelect();
+      populateDefaultTemplateSelect();
+      templateManageSelect.value = newTemplate.id;
+      loadTemplateIntoEditor(newTemplate.id);
+      updateTemplateActionButtons();
+      showToast("New template created", "success");
+    });
+  }
+
+  function deleteTemplate() {
+    const templateId = templateManageSelect.value;
+    const template = getTemplateById(templateId);
+
+    if (!template || template.builtIn) return;
+    if (outreachTemplates.length <= 1) {
+      updateStatus("At least one template is required.");
+      return;
+    }
+
+    if (!confirm(`Delete template "${template.name}"?`)) return;
+
+    outreachTemplates = outreachTemplates.filter(
+      (item) => item.id !== templateId
+    );
+
+    chrome.storage.local.get(["outreachTemplate"], (data) => {
+      const updates = { outreachTemplates };
+      if (data.outreachTemplate === templateId) {
+        updates.outreachTemplate = outreachTemplates[0].id;
+      }
+
+      chrome.storage.local.set(updates, () => {
+        populateOutreachTemplateSelect();
+        populateTemplateManageSelect();
+        populateDefaultTemplateSelect();
+        templateManageSelect.value = outreachTemplates[0].id;
+        loadTemplateIntoEditor(outreachTemplates[0].id);
+        updateTemplateActionButtons();
+        showToast("Template deleted", "success");
+      });
+    });
+  }
+
+  function resetTemplateToDefault() {
+    const templateId = templateManageSelect.value;
+    const defaultTemplate = DEFAULT_OUTREACH_TEMPLATES.find(
+      (template) => template.id === templateId
+    );
+
+    if (!defaultTemplate) return;
+    if (!confirm(`Reset "${defaultTemplate.name}" to default content?`)) return;
+
+    const index = outreachTemplates.findIndex(
+      (template) => template.id === templateId
+    );
+    if (index === -1) return;
+
+    outreachTemplates[index] = { ...defaultTemplate };
+
+    chrome.storage.local.set({ outreachTemplates }, () => {
+      loadTemplateIntoEditor(templateId);
+      showToast("Template reset to default", "success");
+    });
+  }
+
+  function openMailDraft() {
+    if (!collectedEmails.length) {
+      updateStatus("Collect emails first");
+      return;
+    }
+
+    const subject = outreachSubjectInput.value.trim();
+    const body = outreachBodyInput.value.trim();
+
+    if (!subject || !body) {
+      updateStatus("Subject and message are required");
+      return;
+    }
+
+    const draftUrl = buildMailDraftUrl(preferredMailClient, {
+      bcc: collectedEmails,
+      subject,
+      body,
+    });
+
+    chrome.tabs.create({ url: draftUrl });
+    showToast("Draft opened", "success");
+    updateStatus("");
+  }
+
+  function saveOutreachEdits() {
+    generatedSubject = outreachSubjectInput.value;
+    generatedBody = outreachBodyInput.value;
+    chrome.storage.local.set({
+      generatedSubject,
+      generatedBody,
+    });
+  }
+
+  /* =============== SCROLL PROGRESS =============== */
+  function showScrollProgress() {
+    scrollProgressContainer.classList.remove("hidden");
+  }
+
+  function hideScrollProgress() {
+    scrollProgressContainer.classList.add("hidden");
+    scrollProgressFill.style.width = "0%";
+    scrollProgressText.textContent = "Scrolling 0/0";
+  }
+
+  function updateScrollProgress(progress) {
+    if (!progress) return;
+
+    const current = progress.current || 0;
+    const total = progress.total || 0;
+    const percent = total > 0 ? Math.min(100, (current / total) * 100) : 0;
+
+    scrollProgressFill.style.width = `${percent}%`;
+
+    if (progress.phase === "extracting") {
+      scrollProgressText.textContent = "Extracting emails...";
+    } else {
+      scrollProgressText.textContent = `Scrolling ${current}/${total}`;
+    }
+  }
+
+  function setupStorageListener() {
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+      if (namespace !== "local") return;
+
+      if (changes.scrollProgress) {
+        chrome.storage.local.get(["collectionState"], (data) => {
+          if (data.collectionState === "collecting") {
+            showScrollProgress();
+            updateScrollProgress(changes.scrollProgress.newValue);
+          }
+        });
+      }
+
+      if (
+        changes.collectionState &&
+        changes.collectionState.newValue !== "collecting"
+      ) {
+        hideScrollProgress();
+      }
+    });
   }
 
   /* =============== HELPERS =============== */
   function updateStatus(text) {
     statusText.textContent = text;
+    if (text) {
+      statusText.classList.remove("hidden");
+    } else {
+      statusText.classList.add("hidden");
+    }
+  }
+
+  function hideResults() {
+    resultContainer.classList.add("hidden");
+    outreachContainer.classList.add("hidden");
+    collectedEmails = [];
   }
 
   function displayEmails(emails) {
     resultContainer.classList.remove("hidden");
+    outreachContainer.classList.remove("hidden");
     emailCount.textContent = `Found ${emails.length} email${
       emails.length === 1 ? "" : "s"
     }`;
     emailList.textContent = emails.join("\n");
+    applySelectedTemplate(true);
   }
 
-  // Listen for tab updates to update button state
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === "complete") {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -777,7 +1256,6 @@ document.addEventListener("DOMContentLoaded", () => {
           chrome.storage.local.set({ currentTabUrl });
           updateButtonBasedOnUrl(tab.url);
 
-          // Check if this tab has active collection
           chrome.storage.local.get(
             ["activeCollectionTabId", "collectionState"],
             (data) => {
@@ -794,7 +1272,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Listen for tab switches
   chrome.tabs.onActivated.addListener(() => {
     checkCurrentTab();
     loadState();

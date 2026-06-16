@@ -1,0 +1,37 @@
+---
+description: Chrome API usage patterns for ReachIn
+globs: "{assets/js/**,manifest.json}"
+alwaysApply: false
+---
+
+# Chrome API Usage
+
+## Storage
+
+- Use `chrome.storage.local` only — never `sync` or `session`
+- Document new keys in `docs/STORAGE.md`
+- Set install defaults in `background.js` `onInstalled`
+- Keys: camelCase (`scrollSpeed`, `cachedEmails`, `collectionState`)
+
+## Messaging
+
+- Action strings: camelCase (`collectEmails`, `updateSearchInput`)
+- Register new actions in sender AND receiver
+- Update `docs/ARCHITECTURE.md` message registry
+
+## Tabs
+
+- Query active tab: `chrome.tabs.query({ active: true, currentWindow: true })`
+- Remove `onUpdated` listeners after use (15s timeout pattern)
+- Track collection tab via `activeCollectionTabId` in storage
+
+## Permissions
+
+- Request minimum permissions in `manifest.json`
+- Document justification in `docs/MANIFEST.md` and `docs/PRIVACY_AND_SECURITY.md`
+- Do not add permissions without explicit need
+
+## Scripting
+
+- Re-inject content script before messaging if injection may have failed
+- Target specific `tabId`, never inject into arbitrary URLs

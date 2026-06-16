@@ -21,6 +21,8 @@ All data processing happens locally in the browser. ReachIn does not send or sto
 - Keyword-based email exclusion
 - Built-in history of previous collections
 - One-click copy to clipboard
+- Outreach generator with templates and multi-client draft composer (Gmail, Outlook, mailto — local-only, no APIs)
+- SVG icon system with toast notifications for action feedback
 - Light, dark, and system themes
 - Fully local data storage (no external APIs)
 
@@ -47,19 +49,30 @@ For full details, see [`PRIVACY.md`](./PRIVACY.md).
 
 ---
 
+## 📚 Documentation
+
+Engineering documentation and knowledge base: [`docs/README.md`](./docs/README.md)
+
+Covers architecture, storage design, content script behavior, business logic, local development, operations, privacy/security review, and Chrome Web Store preparation.
+
+---
+
 ## 🛠️ Installation (Local Development)
 
 1. Clone the repository
    ```bash
    git clone https://github.com/your-username/reachin.git
    ```
-2. Open Chrome and go to:
+2. Ensure icon assets exist under `assets/icons/` (required for Chrome Web Store; see [`docs/TECHNICAL_DEBT.md`](./docs/TECHNICAL_DEBT.md))
+3. Open Chrome and go to:
    ```
    chrome://extensions
    ```
-3. Enable **Developer mode**
-4. Click **Load unpacked**
-5. Select the project directory
+4. Enable **Developer mode**
+5. Click **Load unpacked**
+6. Select the project directory
+
+See [`docs/LOCAL_DEVELOPMENT.md`](./docs/LOCAL_DEVELOPMENT.md) for debugging and testing workflows.
 
 ---
 

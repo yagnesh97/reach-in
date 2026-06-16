@@ -1,0 +1,31 @@
+---
+description: Security requirements for ReachIn extension
+alwaysApply: true
+---
+
+# Security Standards
+
+## Principle of Least Privilege
+
+- Request only `storage`, `activeTab`, `scripting` permissions
+- Content script matches `https://www.linkedin.com/*` only
+- No `<all_urls>` or broad host permissions
+
+## Data Restrictions
+
+- All processing local — no network transmission
+- No analytics, tracking, or telemetry
+- Do not log email addresses or user keywords
+
+## Input Validation
+
+- Validate email format before storing: `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`
+- Sanitize user input before DOM insertion (use `textContent`, not `innerHTML`)
+- Confirm destructive actions with `confirm()` dialog
+
+## Permission Review
+
+When adding new Chrome permissions:
+1. Justify in `docs/MANIFEST.md`
+2. Update Chrome Web Store listing text
+3. Update `docs/PRIVACY_AND_SECURITY.md`

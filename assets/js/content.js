@@ -122,6 +122,15 @@
     }
   }
 
+  function getScrollRoot() {
+    return document.querySelector("main") || document.documentElement;
+  }
+
+  function scrollPage() {
+    const scrollRoot = getScrollRoot();
+    scrollRoot.scrollBy(0, scrollRoot.clientHeight);
+  }
+
   function scrollAndExtract(
     scrollCount,
     scrollSpeed,
@@ -130,9 +139,19 @@
     callback
   ) {
     let count = 0;
+
+    function setScrollProgress(current, phase) {
+      chrome.storage.local.set({
+        scrollProgress: { current, total: scrollCount, phase },
+      });
+    }
+
+    setScrollProgress(0, "scrolling");
+
     const interval = setInterval(() => {
-      window.scrollBy(0, window.innerHeight);
+      scrollPage();
       count++;
+      setScrollProgress(count, "scrolling");
 
       // Click any "see more" buttons that are currently visible
       document
@@ -156,12 +175,20 @@
 
       if (count >= scrollCount) {
         clearInterval(interval);
-        finishExtraction(excludeKeywords, includeUnique, callback);
+        finishExtraction(scrollCount, excludeKeywords, includeUnique, callback);
       }
     }, scrollSpeed);
   }
 
-  function finishExtraction(excludeKeywords, includeUnique, callback) {
+  function finishExtraction(scrollCount, excludeKeywords, includeUnique, callback) {
+    chrome.storage.local.set({
+      scrollProgress: {
+        current: scrollCount,
+        total: scrollCount,
+        phase: "extracting",
+      },
+    });
+
     // Final pass to click any remaining "see more" buttons
     document
       .querySelectorAll('button.see-more:not([data-clicked="true"])')
@@ -191,6 +218,7 @@
         chrome.storage.local.set({ cachedEmails: combinedEmails });
       }
 
+      chrome.storage.local.remove("scrollProgress");
       callback({ emails: emails });
     }, 2000);
   }

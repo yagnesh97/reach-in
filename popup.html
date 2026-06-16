@@ -9,22 +9,15 @@
 
 <body>
   <div class="container">
-    <!-- Header with Action Buttons -->
+    <!-- Header -->
     <div class="header">
-      <h2>ReachIn</h2>
+      <button id="appTitle" class="app-title" type="button" aria-label="Go to main view" title="Go to main view">
+        <span class="app-title-icon" id="appTitleIcon"></span>
+        <span>ReachIn</span>
+      </button>
       <div class="header-actions">
-        <button id="historyButton" class="icon-button" title="View History">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
-          </svg>
-        </button>
-        <button id="settingsButton" class="icon-button" title="Settings">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M12 1v6m0 6v6m9-9h-6m-6 0H3"></path>
-          </svg>
-        </button>
+        <button id="historyButton" class="btn btn-icon" type="button" aria-label="View History" title="View History"></button>
+        <button id="settingsButton" class="btn btn-icon" type="button" aria-label="Settings" title="Settings"></button>
       </div>
     </div>
 
@@ -54,108 +47,195 @@
         />
       </div>
 
-      <div class="form-group checkbox">
-        <label>
-          <input type="checkbox" id="includeUnique" checked />
-          Collect Only Unique Emails (across sessions)
-        </label>
+      <button id="collectButton" class="btn btn-primary btn-block">Check LinkedIn Page</button>
+
+      <div id="statusText" class="status hidden"></div>
+
+      <div id="scrollProgressContainer" class="scroll-progress hidden">
+        <div class="scroll-progress-track">
+          <div id="scrollProgressFill" class="scroll-progress-fill"></div>
+        </div>
+        <div id="scrollProgressText" class="scroll-progress-text">Scrolling 0/20</div>
       </div>
 
-      <button id="collectButton" class="primary-button">Check LinkedIn Page</button>
-
-      <div id="statusText" class="status"></div>
-
-      <div id="resultContainer" class="result-container hidden">
+      <div id="resultContainer" class="card result-container hidden">
         <div class="result-header">
           <div id="emailCount" class="email-count"></div>
-          <button id="copyButton" class="copy-button">Copy All</button>
+          <button id="copyButton" class="btn btn-icon btn-success-icon" type="button" aria-label="Copy Emails" title="Copy Emails"></button>
         </div>
         <div id="emailList" class="email-list"></div>
+      </div>
+
+      <div id="outreachContainer" class="card outreach-container hidden">
+        <div class="card-header">
+          <span class="card-title">Outreach</span>
+        </div>
+        <div class="card-body outreach-content">
+          <div class="form-group">
+            <label for="outreachTemplate">Template</label>
+            <select id="outreachTemplate"></select>
+          </div>
+          <div class="form-group">
+            <label for="outreachSubject">Subject</label>
+            <input type="text" id="outreachSubject" />
+          </div>
+          <div class="form-group">
+            <label for="outreachBody">Message</label>
+            <textarea id="outreachBody" rows="8"></textarea>
+          </div>
+          <div class="outreach-actions">
+            <button id="openDraftButton" class="btn btn-primary btn-block" type="button">
+              <span id="openDraftIcon"></span>
+              <span>Open Draft</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- History View -->
     <div id="historyView" class="view hidden">
       <div class="view-header">
-        <button id="backFromHistory" class="back-button">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 12H5M12 19l-7-7 7-7"/>
-          </svg>
-          Back
-        </button>
+        <button id="backFromHistory" class="btn btn-icon" type="button" aria-label="Back to main" title="Back to main"></button>
         <h3>Collection History</h3>
       </div>
-      
+
       <div id="historyList" class="history-list"></div>
       <div id="emptyHistory" class="empty-state hidden">
-        <p>No collection history yet. Start collecting emails to see them here.</p>
+        <div id="emptyHistoryIcon" class="empty-state-icon"></div>
+        <p class="empty-state-title">No collection history yet</p>
+        <p class="empty-state-subtitle">Start collecting emails to see them here.</p>
       </div>
     </div>
 
     <!-- Settings View -->
     <div id="settingsView" class="view hidden">
       <div class="view-header">
-        <button id="backFromSettings" class="back-button">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 12H5M12 19l-7-7 7-7"/>
-          </svg>
-          Back
-        </button>
+        <button id="backFromSettings" class="btn btn-icon" type="button" aria-label="Back to main" title="Back to main"></button>
         <h3>Settings</h3>
       </div>
 
       <div class="settings-content">
-        <div class="setting-group">
-          <label class="setting-label">Theme</label>
-          <select id="themeSelect" class="setting-select">
-            <option value="system">System Default</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </div>
-
-        <div class="setting-group">
-          <label class="setting-label">Storage Usage</label>
-          <div class="storage-info">
-            <div id="storageUsage" class="storage-text">Calculating...</div>
-            <button id="clearStorageButton" class="secondary-button">Clear All Data</button>
+        <!-- Appearance -->
+        <section class="settings-group card">
+          <h4 class="settings-group-title">Appearance</h4>
+          <div class="setting-row">
+            <label class="setting-label" for="themeSelect">Theme</label>
+            <select id="themeSelect" class="setting-select">
+              <option value="system">System Default</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
           </div>
-        </div>
+        </section>
 
-        <div class="setting-group">
-          <label class="setting-label">Auto-scroll Speed</label>
-          <select id="scrollSpeedSelect" class="setting-select">
-            <option value="1000">Fast (1s)</option>
-            <option value="2000" selected>Normal (2s)</option>
-            <option value="3000">Slow (3s)</option>
-          </select>
-        </div>
-
-        <div class="setting-group">
+        <!-- Collection -->
+        <section class="settings-group card">
+          <h4 class="settings-group-title">Collection</h4>
+          <div class="setting-row">
+            <label class="setting-label" for="scrollSpeedSelect">Scroll Speed</label>
+            <select id="scrollSpeedSelect" class="setting-select">
+              <option value="1000">Fast (1s)</option>
+              <option value="2000" selected>Normal (2s)</option>
+              <option value="3000">Slow (3s)</option>
+            </select>
+          </div>
           <div class="checkbox-setting">
             <input type="checkbox" id="autoNavigate" checked />
             <label for="autoNavigate">Auto-navigate to LinkedIn search if not on search page</label>
           </div>
-        </div>
-
-        <div class="setting-group">
           <div class="checkbox-setting">
-            <input type="checkbox" id="showNotifications" checked />
-            <label for="showNotifications">Show status notifications</label>
+            <input type="checkbox" id="includeUnique" checked />
+            <label for="includeUnique">Collect only unique emails (across sessions)</label>
           </div>
-        </div>
+        </section>
 
-        <div class="setting-group">
-          <label class="setting-label">About</label>
+        <!-- Outreach -->
+        <section class="settings-group card">
+          <h4 class="settings-group-title">Outreach</h4>
+          <div class="setting-row">
+            <label class="setting-label" for="preferredMailClient">Default Mail Client</label>
+            <select id="preferredMailClient" class="setting-select">
+              <option value="gmail">Gmail</option>
+              <option value="outlook">Outlook</option>
+              <option value="mailto">System Default Mail App</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="defaultTemplateSelect">Default Template</label>
+            <select id="defaultTemplateSelect" class="setting-select"></select>
+          </div>
+          <div class="settings-divider"></div>
+          <div class="setting-row">
+            <label class="setting-label" for="templateManageSelect">Manage Templates</label>
+            <select id="templateManageSelect" class="setting-select"></select>
+          </div>
+          <div class="template-editor">
+            <div class="template-editor-fields">
+              <input type="text" id="templateNameInput" placeholder="Template name" />
+              <input type="text" id="templateSubjectInput" placeholder="Subject" />
+              <textarea id="templateBodyInput" rows="5" placeholder="Message body"></textarea>
+            </div>
+            <div id="unsavedIndicator" class="unsaved-indicator hidden">
+              <span class="unsaved-dot"></span> Unsaved changes
+            </div>
+            <div class="template-editor-actions">
+              <button id="saveTemplateButton" class="btn btn-primary" type="button" disabled>
+                <span id="saveTemplateIcon"></span>
+                <span>Save</span>
+              </button>
+              <button id="addTemplateButton" class="btn btn-secondary" type="button">
+                <span id="addTemplateIcon"></span>
+                <span>Add New</span>
+              </button>
+              <button id="deleteTemplateButton" class="btn btn-danger" type="button">
+                <span id="deleteTemplateIcon"></span>
+                <span>Delete</span>
+              </button>
+              <button id="resetTemplateButton" class="btn btn-secondary" type="button">
+                <span id="resetTemplateIcon"></span>
+                <span>Reset</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Storage -->
+        <section class="settings-group card">
+          <h4 class="settings-group-title">Storage</h4>
+          <div class="storage-info">
+            <div id="storageUsage" class="storage-text">Calculating...</div>
+            <button id="clearStorageButton" class="btn btn-danger" type="button">
+              <span id="clearStorageIcon"></span>
+              <span>Clear All Data</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- About -->
+        <section class="settings-group card">
+          <h4 class="settings-group-title">About</h4>
           <div class="about-info">
             <p><strong>Version:</strong> 1.0.0</p>
             <p><strong>Description:</strong> LinkedIn search email collection tool.</p>
+            <p>
+              <a href="https://github.com/superaze/extensions" target="_blank" rel="noopener noreferrer" class="privacy-link">
+                <span id="privacyLinkIcon"></span>
+                Privacy &amp; Data
+              </a>
+            </p>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   </div>
 
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="assets/js/ui/icons.js"></script>
+  <script src="assets/js/ui/toast.js"></script>
+  <script src="assets/js/mail-clients.js"></script>
+  <script src="assets/js/outreach-templates.js"></script>
   <script src="assets/js/popup.js"></script>
 </body>
 </html>
