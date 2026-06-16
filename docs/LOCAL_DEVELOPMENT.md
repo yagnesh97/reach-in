@@ -39,7 +39,7 @@ Guide for setting up, running, and debugging ReachIn during development.
 
 5. Select the project root directory (contains `manifest.json`)
 
-6. Verify ReachIn appears in the extensions list with version 1.0.0
+6. Verify ReachIn appears in the extensions list with version 1.1.0
 
 **Note:** Icon files under `assets/icons/` are referenced in the manifest but may be missing from the repository. Chrome will show a default puzzle piece icon if icons are absent.
 

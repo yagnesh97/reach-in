@@ -24,7 +24,7 @@ ReachIn uses **Manifest V3**. Key MV3 characteristics in this extension:
 | Field | Value | Notes |
 |-------|-------|-------|
 | `name` | `"ReachIn"` | Display name |
-| `version` | `"1.0.0"` | Semver; also shown in Settings About section |
+| `version` | `"1.1.0"` | Semver; also shown in Settings About section |
 | `description` | LinkedIn email collection from search results | Store listing description |
 
 ---
