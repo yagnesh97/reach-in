@@ -13,26 +13,24 @@ flowchart TD
   A[User clicks Collect] --> B{Keywords provided?}
   B -->|No| C[Status: Please enter search keywords]
   B -->|Yes| D[processKeywords AND join]
-  D --> E[Save keywords scrollCount excludeKeywords]
-  E --> F[Navigation decision tree]
-  F --> G[startEmailCollection]
-  G --> H[Set collectionState collecting]
-  H --> I[executeScript content.js]
-  I --> J[sendMessage collectEmails]
-  J --> K[Content: scroll expand extract]
-  K --> L{Emails found?}
-  L -->|Yes| M[Display results]
-  M --> N[Save to storage]
-  M --> O[saveToHistory]
-  L -->|No| P[Status: No emails found]
-  L -->|Error| Q[Status: error message]
+  D --> E[Popup sends startSmartCollect]
+  E --> F[CollectionFlowManager detectContext]
+  F --> G[Navigate or collect immediately]
+  G --> H[Set collectionFlowState COLLECTING]
+  H --> I[sendMessage collectEmails]
+  I --> J[Content: scroll expand extract]
+  J --> K{Emails found?}
+  K -->|Yes| L[complete: storage + history]
+  L --> M[Popup displays via storage.onChanged]
+  K -->|No| N[collectionNoEmails flag]
+  K -->|Error| O[fail: collectionError]
 ```
 
 ---
 
 ## Keyword Processing
 
-Function: `processKeywords(input)` in `popup.js:280-289`
+Function: `processKeywords(input)` in `collection-utils.js`
 
 **Input:** Comma-separated string (e.g., `"python, mumbai, hiring"`)
 
@@ -79,68 +77,84 @@ Exact string match determines if re-navigation is needed.
 
 ---
 
-## Navigation Decision Tree
+## Smart Collect Scenarios
 
-Function: `handleCollect()` in `popup.js:312-514`
+Entry: `CollectionFlowManager.startSmartCollect()` in `collection-flow-manager.js`
+
+`detectCollectionContext(url, processedKeywords)` returns one of four scenarios:
 
 ```mermaid
 flowchart TD
-  Start[handleCollect] --> Case1{On linkedin.com?}
-  Case1 -->|No| NewTab[Case 1: tabs.create new tab]
+  Start[startSmartCollect] --> Case1{On linkedin.com?}
+  Case1 -->|No| OffLI[offLinkedIn: tabs.create]
   Case1 -->|Yes| Case2{On search results page?}
   Case2 -->|Yes| Case3{Keywords match URL?}
-  Case3 -->|No| UpdateSearch[Case 2: updateSearchInput or URL navigate]
-  Case3 -->|Yes| Collect[Case 4: startEmailCollection]
-  Case2 -->|No| Navigate[Case 3: tabs.update to search URL]
-  NewTab --> AutoPopup[Signal openPopupOnTabReady]
-  UpdateSearch --> AutoCollect[Auto-collect after search update]
-  Navigate --> WaitClick[Wait for user to click Collect again]
+  Case3 -->|No| Mismatch[searchMismatch: updateSearchInput or URL nav]
+  Case3 -->|Yes| Ready[searchReady: startCollection immediately]
+  Case2 -->|No| Other[linkedInOther: tabs.update to search URL]
+  OffLI --> Wait[onTabUpdated waits for page ready]
+  Mismatch --> Wait
+  Other --> Wait
+  Wait --> Collect[startCollection]
+  Ready --> Collect
 ```
 
-### Case 1: Not on LinkedIn
+### Scenario: Not on LinkedIn (`offLinkedIn`)
 
 **Condition:** `!url.includes("linkedin.com")`
 
-**Action (autoNavigate enabled):**
+**Action:**
+- `collectionFlowState` → `OPENING_LINKEDIN` → `WAITING_FOR_PAGE`
 - `chrome.tabs.create({ url: searchUrl, active: true })`
-- Send `openPopupOnTabReady` to background
-- Status: "Opening LinkedIn in new tab..."
+- Best-effort popup reopen on tab ready
+- Auto-start collection when search page loads
 
-**Action (autoNavigate disabled):**
-- Status: "Please navigate to LinkedIn manually."
+### Scenario: On Search Page, Keywords Don't Match (`searchMismatch`)
 
-Background service worker attempts to auto-open popup when new tab finishes loading.
+**Condition:** On search results URL but keywords differ
 
-### Case 2: On Search Page, Keywords Don't Match
+**Action:**
+1. `collectionFlowState` → `WAITING_FOR_PAGE`
+2. Try `updateSearchInput` message to content script
+3. If failed → fallback to `chrome.tabs.update` with new search URL
+4. On page ready → `startCollection`
 
-**Condition:** `isOnLinkedInSearch && !keywordsMatch`
+### Scenario: On LinkedIn, Not on Search Page (`linkedInOther`)
 
-**Action (autoNavigate enabled):**
-1. Try `updateSearchInput` message to content script
-2. If failed → fallback to `chrome.tabs.update` with new search URL
-3. If succeeded → wait for page update, then auto-start collection
+**Condition:** On LinkedIn but not content search results
 
-**Action (autoNavigate disabled):**
-- Status: "Please navigate to new search manually."
-
-### Case 3: On LinkedIn, Not on Search Page
-
-**Condition:** `!isOnLinkedInSearch`
-
-**Action (autoNavigate enabled):**
+**Action:**
+- `collectionFlowState` → `NAVIGATING_TO_SEARCH` → `WAITING_FOR_PAGE`
 - `chrome.tabs.update({ url: searchUrl })`
-- Wait for page load
-- Status: "Search page loaded. Click 'Collect Emails' to start."
+- Auto-start collection when search page loads
 
-User must click Collect again after navigation.
+### Scenario: On Correct Search Page (`searchReady`)
 
-### Case 4: On Correct Search Page
+**Condition:** On search results with matching keywords
 
-**Condition:** `isOnLinkedInSearch && keywordsMatch`
+**Action:** `startCollection(tabId)` immediately (`PREPARING_COLLECTION` → `COLLECTING`)
 
-**Action:** `startEmailCollection(tabId, scrollCount, excludeKeywords)`
+### Flow States
 
-Immediate collection start.
+| State | Meaning |
+|-------|---------|
+| `IDLE` | No active flow |
+| `OPENING_LINKEDIN` | Creating new LinkedIn tab |
+| `NAVIGATING_TO_SEARCH` | Updating tab to search URL |
+| `WAITING_FOR_PAGE` | Waiting for search page to load |
+| `PREPARING_COLLECTION` | Brief transition before collect |
+| `COLLECTING` | Content script running |
+| `COMPLETED` | Emails stored; history saved |
+| `ERROR` | Flow failed; `collectionError` set |
+
+### Timeouts and Errors
+
+| Condition | `collectionError` |
+|-----------|-------------------|
+| Tab create/update fails | `Unable to open LinkedIn` |
+| Search page never ready | `Unable to load search results` |
+| `sendMessage` fails | `Collection could not start` |
+| 30s navigation timeout | `LinkedIn took too long to respond` |
 
 ---
 
@@ -244,9 +258,9 @@ Settings template editor tracks baseline on load/select. Save button enables onl
 
 ### Save
 
-Function: `saveToHistory(keywords, emails)` in `popup.js:615-634`
+Function: `saveToHistory()` in `collection-flow-manager.js` → `complete()`
 
-Triggered after successful collection (emails found).
+Triggered after successful collection (emails found). Popup is not required.
 
 **Entry structure:**
 ```javascript
@@ -281,23 +295,30 @@ Complete search-to-results workflow:
 sequenceDiagram
   participant User
   participant Popup
+  participant SW as background.js
+  participant CFM as CollectionFlowManager
   participant Tabs
   participant CS as Content Script
   participant LI as LinkedIn
 
   User->>Popup: Enter keywords click Collect
-  Popup->>Popup: processKeywords
+  Popup->>SW: startSmartCollect
+  SW->>CFM: startSmartCollect
+  CFM->>CFM: processKeywords detectContext
   alt Not on LinkedIn
-    Popup->>Tabs: create searchUrl
+    CFM->>Tabs: create searchUrl
     Tabs->>LI: Load search page
-    Popup->>Popup: openPopupOnTabReady
+    CFM->>CFM: onTabUpdated onSearchPageReady
   else Wrong page or keywords
-    Popup->>Tabs: update URL or sendMessage updateSearchInput
+    CFM->>Tabs: update URL or sendMessage updateSearchInput
     Tabs->>LI: Navigate or update search
+    CFM->>CFM: onTabUpdated onSearchPageReady
   else Ready to collect
-    Popup->>Tabs: executeScript + collectEmails
+    CFM->>CS: collectEmails
     CS->>LI: Scroll expand extract
-    CS-->>Popup: emails
+    CS-->>CFM: emails
+    CFM->>CFM: complete history save
+    CFM-->>Popup: storage.onChanged
     Popup->>User: Display results
   end
 ```
@@ -305,13 +326,6 @@ sequenceDiagram
 ---
 
 ## User Decision Flows
-
-### Auto-Navigate Setting
-
-| Setting | User Experience |
-|---------|----------------|
-| Enabled (default) | Extension navigates automatically; minimal manual steps |
-| Disabled | User must manually open LinkedIn and navigate to search |
 
 ### Unique Emails Setting
 

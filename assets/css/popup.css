@@ -375,6 +375,76 @@ label {
   display: none !important;
 }
 
+/* Collection flow stepper */
+.collection-flow-progress {
+  margin-top: var(--field-spacing);
+  padding: var(--field-spacing);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.collection-flow-progress.hidden {
+  display: none;
+}
+
+.flow-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-hint);
+  line-height: 1.3;
+}
+
+.flow-step-active .flow-step-label {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.flow-step-done .flow-step-label {
+  color: var(--text-secondary);
+}
+
+.flow-step-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.flow-step-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.flow-step-pending .flow-step-icon::before {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--border-color);
+  border-radius: 50%;
+}
+
+.flow-step-active .flow-step-icon::before {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  background-color: var(--accent-color);
+  border-radius: 50%;
+}
+
+.flow-step-done .flow-step-icon {
+  color: var(--success-color);
+}
+
 /* Scroll progress */
 .scroll-progress {
   margin-top: var(--space-md);

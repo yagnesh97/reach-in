@@ -13,7 +13,9 @@ Generated from full repository analysis. All behavior documented is verified aga
 | `assets/js/popup.js` | JavaScript (popup logic) | ~870 | Analyzed |
 | `assets/js/outreach-templates.js` | JavaScript (outreach templates) | ~55 | Analyzed |
 | `assets/js/content.js` | JavaScript (content script) | 257 | Analyzed |
-| `assets/js/background.js` | JavaScript (service worker) | 166 | Analyzed |
+| `assets/js/background.js` | JavaScript (service worker) | ~200 | Analyzed |
+| `assets/js/collection-utils.js` | JavaScript (shared helpers) | ~80 | Analyzed |
+| `assets/js/collection-flow-manager.js` | JavaScript (flow orchestrator) | ~400 | Analyzed |
 | `assets/css/popup.css` | CSS (theming/layout) | 591 | Analyzed |
 | `PRIVACY.md` | Privacy policy | 87 | Analyzed |
 | `README.md` | User documentation | 103 | Analyzed |
@@ -37,7 +39,7 @@ Generated from full repository analysis. All behavior documented is verified aga
 |------------|-------------|---------|
 | `storage` | `manifest.json:6` | All JS modules (`chrome.storage.local`) |
 | `activeTab` | `manifest.json:6` | Implicit tab access on user gesture |
-| `scripting` | `manifest.json:6` | `popup.js` — `chrome.scripting.executeScript` |
+| `scripting` | `manifest.json:6` | Declared; not used on smart collect path |
 
 ### Implicit Host Access
 
@@ -55,25 +57,23 @@ No explicit `host_permissions` declared. No `tabs` permission declared despite e
 |-----|-----------|---------|
 | `chrome.runtime.onInstalled` | background | Default settings on install |
 | `chrome.runtime.onMessage` | background, content | Message routing |
-| `chrome.runtime.sendMessage` | popup | Popup → background messaging |
-| `chrome.runtime.lastError` | popup | Error checking after API calls |
+| `chrome.runtime.sendMessage` | popup, background | Popup → background smart collect |
+| `chrome.runtime.lastError` | popup, background | Error checking after API calls |
 | `chrome.storage.local.get` | all JS | Read persisted state |
 | `chrome.storage.local.set` | all JS | Write persisted state |
-| `chrome.storage.local.set` | content | `scrollProgress` during collection |
 | `chrome.storage.local.remove` | content | Clear `cachedEmails` |
 | `chrome.storage.local.clear` | popup | Clear all data (settings) |
 | `chrome.storage.local.getBytesInUse` | popup | Storage usage display |
-| `chrome.storage.onChanged` | background, popup | Collection state log; scroll progress UI |
-| `chrome.tabs.query` | popup | Active tab detection |
-| `chrome.tabs.get` | popup | Verify collection tab exists |
-| `chrome.tabs.create` | popup | Open LinkedIn search tab; open Gmail compose draft |
-| `chrome.tabs.update` | popup | Navigate to search URL |
-| `chrome.tabs.sendMessage` | popup | Popup → content messaging |
-| `chrome.tabs.onUpdated` | popup, background | Navigation completion |
+| `chrome.storage.onChanged` | background, popup | Flow state; scroll progress UI |
+| `chrome.tabs.sendMessage` | background | Background → content messaging |
+| `chrome.tabs.query` | popup, background | Active tab detection |
+| `chrome.tabs.get` | popup, background | Verify collection tab exists |
+| `chrome.tabs.create` | background | Open LinkedIn search tab; open mail draft |
+| `chrome.tabs.update` | background | Navigate to search URL |
+| `chrome.tabs.onUpdated` | background | Flow manager page-ready detection |
 | `chrome.tabs.onRemoved` | background | Collection tab cleanup |
 | `chrome.tabs.onActivated` | popup | Tab switch state reload |
-| `chrome.scripting.executeScript` | popup | Re-inject content script |
-| `chrome.action.openPopup` | background | Auto-open popup after new tab |
+| `chrome.action.openPopup` | background | Best-effort popup reopen during flow |
 
 ### Browser APIs (Non-Chrome)
 
@@ -94,9 +94,8 @@ No `fetch`, `XMLHttpRequest`, WebSocket, or external network calls exist anywher
 | Script | Injection Method | Match Pattern |
 |--------|------------------|---------------|
 | `assets/js/content.js` | Manifest auto-inject | `https://www.linkedin.com/*` |
-| `assets/js/content.js` | `chrome.scripting.executeScript` (on collect) | Active tab at collection time |
 
-Dual injection guarded by `window.__linkedinEmailCollectorInitialized` in `content.js:4-7`.
+Guarded by `window.__linkedinEmailCollectorInitialized` in `content.js`.
 
 ---
 
@@ -126,18 +125,20 @@ No dedicated options page.
 |-----|------|---------|------------|---------|
 | `theme` | `"system"\|"light"\|"dark"` | `"system"` | popup, background | popup |
 | `scrollSpeed` | `"1000"\|"2000"\|"3000"` | `"2000"` | popup, background | popup → content |
-| `autoNavigate` | boolean | `true` | popup, background | popup |
-| `includeUnique` | boolean | `true` | popup, background | popup → content |
+| `autoNavigate` | boolean | `true` | — | **Removed** (always smart collect) |
+| `includeUnique` | boolean | `true` | popup, background | popup → background |
 | `preferredMailClient` | `"gmail"\|"outlook"\|"mailto"` | `"gmail"` | popup, background | popup |
-| `cachedEmails` | `string[]` | `[]` | content | content |
+| `collectionFlowState` | string | `IDLE` | background | popup |
+| `collectionIntent` | object | — | background | background |
+| `collectionError` | string | — | background | popup |
+| `collectionState` | `"idle"\|"collecting"\|"completed"` | `"idle"` | background | popup (legacy) |
 | `keywords` | string | — | popup | popup |
 | `scrollCount` | string/number | `"20"` (HTML default) | popup | popup |
 | `excludeKeywords` | string | — | popup | popup |
-| `collectionState` | `"idle"\|"collecting"\|"completed"` | `"idle"` | popup, background | popup, background |
-| `collectedEmails` | `string[]` | `[]` | popup | popup |
-| `activeCollectionTabId` | number \| null | `null` | popup, background | popup, background |
+| `collectedEmails` | `string[]` | `[]` | background | popup |
+| `activeCollectionTabId` | number \| null | `null` | background | popup, background |
 | `currentTabUrl` | string | — | popup, background | background |
-| `history` | `HistoryItem[]` | `[]` | popup | popup |
+| `history` | `HistoryItem[]` | `[]` | background | popup |
 | `statusText` | string | — | popup (write only) | never read |
 | `outreachTemplate` | string | `"jobApplication"` | popup, background | popup |
 | `outreachTemplates` | `TemplateItem[]` | seeded | popup, background | popup |
@@ -161,6 +162,7 @@ No dedicated options page.
 | `#unsavedIndicator` | indicator | Template editor dirty state |
 | `#toastContainer` | container | Toast notification stack |
 | `#appTitle` | button | Navigate to main view |
+| `#collectionFlowProgress` | stepper | 4-step smart collect progress |
 | `#scrollProgressContainer` | panel | Scroll progress wrapper |
 | `#scrollProgressFill` | div | Progress bar fill |
 | `#scrollProgressText` | div | Progress label |
@@ -179,11 +181,13 @@ No dedicated options page.
 
 | Action | Direction | Payload | Response | Status |
 |--------|-----------|---------|----------|--------|
-| `openPopupOnTabReady` | popup → background | `{ tabId: number }` | `{ success: true }` | Active |
+| `openPopupOnTabReady` | popup → background | `{ tabId }` | `{ success }` | Legacy (flow manager handles reopen) |
+| `startSmartCollect` | popup → background | `{ keywords, scrollCount, excludeKeywords, includeUnique }` | `{ success, error? }` | Active |
+| `getCollectionFlow` | popup → background | — | flow state snapshot | Active |
 | `updateState` | popup → background | `{ data: object }` | `{ success: true }` | **Unused** |
 | `getState` | popup → background | `{ keys?: string[] }` | storage data | **Unused** |
-| `collectEmails` | popup → content | `{ scrollCount, scrollSpeed, excludeKeywords, includeUnique }` | `{ emails: string[] }` | Active |
-| `updateSearchInput` | popup → content | `{ keywords: string }` | `{ success: boolean }` | Active |
+| `collectEmails` | background → content | `{ scrollCount, scrollSpeed, excludeKeywords, includeUnique }` | `{ emails: string[] }` | Active |
+| `updateSearchInput` | background → content | `{ keywords: string }` | `{ success: boolean }` | Active |
 | `clearCache` | any → content | — | `{ success: true }` | **Unused** |
 
 ---
@@ -235,11 +239,13 @@ No dedicated options page.
 
 ---
 
-## UI Modules (Phase 1.5)
+## UI Modules (Phase 1.5 + Smart Collect)
 
 | File | Purpose |
 |------|---------|
 | `assets/js/ui/icons.js` | Centralized SVG icon library (`Icons`, `renderIcon`, `createIconButton`) |
+| `assets/js/collection-utils.js` | Shared keyword/URL helpers + flow state constants |
+| `assets/js/collection-flow-manager.js` | Background collection orchestrator |
 | `assets/js/ui/toast.js` | Toast notifications (`showToast`) |
 | `assets/js/mail-clients.js` | Mail draft URL builders (`buildMailDraftUrl`) |
 

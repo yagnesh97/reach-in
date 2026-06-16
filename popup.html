@@ -47,9 +47,28 @@
         />
       </div>
 
-      <button id="collectButton" class="btn btn-primary btn-block">Check LinkedIn Page</button>
+      <button id="collectButton" class="btn btn-primary btn-block">Collect</button>
 
       <div id="statusText" class="status hidden"></div>
+
+      <div id="collectionFlowProgress" class="collection-flow-progress hidden">
+        <div class="flow-step" data-step="opening">
+          <span class="flow-step-icon" data-step-icon="opening"></span>
+          <span class="flow-step-label">Opening LinkedIn</span>
+        </div>
+        <div class="flow-step" data-step="loading">
+          <span class="flow-step-icon" data-step-icon="loading"></span>
+          <span class="flow-step-label">Loading Search Results</span>
+        </div>
+        <div class="flow-step" data-step="collecting">
+          <span class="flow-step-icon" data-step-icon="collecting"></span>
+          <span class="flow-step-label">Collecting Emails</span>
+        </div>
+        <div class="flow-step" data-step="complete">
+          <span class="flow-step-icon" data-step-icon="complete"></span>
+          <span class="flow-step-label">Complete</span>
+        </div>
+      </div>
 
       <div id="scrollProgressContainer" class="scroll-progress hidden">
         <div class="scroll-progress-track">
@@ -141,10 +160,6 @@
             </select>
           </div>
           <div class="checkbox-setting">
-            <input type="checkbox" id="autoNavigate" checked />
-            <label for="autoNavigate">Auto-navigate to LinkedIn search if not on search page</label>
-          </div>
-          <div class="checkbox-setting">
             <input type="checkbox" id="includeUnique" checked />
             <label for="includeUnique">Collect only unique emails (across sessions)</label>
           </div>
@@ -232,6 +247,7 @@
 
   <div id="toastContainer" class="toast-container"></div>
 
+  <script src="assets/js/collection-utils.js"></script>
   <script src="assets/js/ui/icons.js"></script>
   <script src="assets/js/ui/toast.js"></script>
   <script src="assets/js/mail-clients.js"></script>

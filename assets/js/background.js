@@ -1,185 +1,105 @@
 // background.js - Service worker for maintaining state
-importScripts("outreach-templates.js");
+importScripts(
+  "outreach-templates.js",
+  "collection-utils.js",
+  "collection-flow-manager.js"
+);
 
-// Listen for extension installation
 chrome.runtime.onInstalled.addListener(() => {
   console.log("ReachIn installed");
 
-  // Initialize default settings
   chrome.storage.local.get(
     [
       "theme",
       "scrollSpeed",
-      "autoNavigate",
       "outreachTemplate",
       "outreachTemplates",
       "preferredMailClient",
       "includeUnique",
+      "collectionFlowState",
     ],
     (data) => {
-      if (!data.theme) {
-        chrome.storage.local.set({ theme: "system" });
-      }
-      if (!data.scrollSpeed) {
-        chrome.storage.local.set({ scrollSpeed: "2000" });
-      }
-      if (data.autoNavigate === undefined) {
-        chrome.storage.local.set({ autoNavigate: true });
-      }
-      if (data.includeUnique === undefined) {
-        chrome.storage.local.set({ includeUnique: true });
-      }
-      if (!data.preferredMailClient) {
-        chrome.storage.local.set({ preferredMailClient: "gmail" });
-      }
-      if (!data.outreachTemplate) {
-        chrome.storage.local.set({ outreachTemplate: "jobApplication" });
-      }
+      const defaults = {};
+      if (!data.theme) defaults.theme = "system";
+      if (!data.scrollSpeed) defaults.scrollSpeed = "2000";
+      if (data.includeUnique === undefined) defaults.includeUnique = true;
+      if (!data.preferredMailClient) defaults.preferredMailClient = "gmail";
+      if (!data.outreachTemplate) defaults.outreachTemplate = "jobApplication";
+      if (!data.collectionFlowState) defaults.collectionFlowState = COLLECTION_FLOW_STATE.IDLE;
       if (!data.outreachTemplates || !data.outreachTemplates.length) {
-        chrome.storage.local.set({
-          outreachTemplates: DEFAULT_OUTREACH_TEMPLATES,
-        });
+        defaults.outreachTemplates = DEFAULT_OUTREACH_TEMPLATES;
+      }
+      if (Object.keys(defaults).length) {
+        chrome.storage.local.set(defaults);
       }
     }
   );
 });
 
-// Track tabs that need popup to open
-let pendingPopupTabs = {};
-
-// Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "startSmartCollect") {
+    CollectionFlowManager.startSmartCollect({
+      keywords: request.keywords,
+      scrollCount: request.scrollCount,
+      excludeKeywords: request.excludeKeywords,
+      includeUnique: request.includeUnique,
+      tabId: request.tabId,
+      tabUrl: request.tabUrl,
+      windowId: request.windowId,
+    }).then(sendResponse);
+    return true;
+  }
+
+  if (request.action === "resumeCollectionFlow") {
+    CollectionFlowManager.resumeWaitingFlow().then(sendResponse);
+    return true;
+  }
+
+  if (request.action === "searchPageReady" && sender.tab?.id) {
+    CollectionFlowManager.handleSearchPageReady(sender.tab.id).then(sendResponse);
+    return true;
+  }
+
+  if (request.action === "getCollectionFlow") {
+    chrome.storage.local.get(
+      [
+        "collectionFlowState",
+        "collectionIntent",
+        "collectionError",
+        "scrollProgress",
+        "collectedEmails",
+        "activeCollectionTabId",
+      ],
+      (data) => {
+        sendResponse(data);
+      }
+    );
+    return true;
+  }
+
   if (request.action === "openPopupOnTabReady") {
-    pendingPopupTabs[request.tabId] = {
-      timestamp: Date.now(),
-      attempts: 0,
-    };
     sendResponse({ success: true });
-    return true;
-  }
-
-  if (request.action === "updateState") {
-    chrome.storage.local.set(request.data, () => {
-      sendResponse({ success: true });
-    });
-    return true;
-  }
-
-  if (request.action === "getState") {
-    chrome.storage.local.get(request.keys || null, (data) => {
-      sendResponse(data);
-    });
     return true;
   }
 });
 
-// Listen for tab updates to auto-open popup
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === "complete") {
-    // Check if this tab needs popup to open
-    if (pendingPopupTabs[tabId]) {
-      const pending = pendingPopupTabs[tabId];
-      const now = Date.now();
+  CollectionFlowManager.onTabUpdated(tabId, changeInfo, tab);
+});
 
-      // Only try if within 15 seconds and less than 3 attempts
-      if (now - pending.timestamp < 15000 && pending.attempts < 3) {
-        pending.attempts++;
+chrome.tabs.onRemoved.addListener((tabId) => {
+  CollectionFlowManager.onTabRemoved(tabId);
+});
 
-        // Wait a moment for the page to fully render
-        setTimeout(() => {
-          chrome.action.openPopup().catch((error) => {
-            console.log("Could not auto-open popup:", error);
-
-            // If failed, try again after a delay
-            if (pending.attempts < 3) {
-              setTimeout(() => {
-                chrome.action.openPopup().catch(() => {
-                  console.log("Retry failed");
-                });
-              }, 1000);
-            }
-          });
-        }, 1000);
-
-        // Clean up after 3 attempts or timeout
-        if (pending.attempts >= 3 || now - pending.timestamp > 10000) {
-          delete pendingPopupTabs[tabId];
-        }
-      } else {
-        delete pendingPopupTabs[tabId];
-      }
-    }
-
-    // Store the current tab URL and check collection state
-    chrome.storage.local.get(
-      ["collectionState", "activeCollectionTabId"],
-      (data) => {
-        if (
-          data.collectionState === "collecting" &&
-          data.activeCollectionTabId !== tabId
-        ) {
-          // Different tab completed loading while collection was active on another tab
-          // Keep the collection state for the active collection tab
-        } else if (
-          data.collectionState === "collecting" &&
-          data.activeCollectionTabId === tabId
-        ) {
-          // The collecting tab completed navigation (maybe user refreshed)
-          // Reset collection state
-          chrome.storage.local.set({
-            collectionState: "idle",
-            activeCollectionTabId: null,
-          });
-        }
-
-        chrome.storage.local.set({ currentTabUrl: tab.url });
-      }
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === "local" && changes.collectionFlowState) {
+    console.log(
+      "Collection flow state:",
+      changes.collectionFlowState.newValue
     );
   }
 });
 
-// Clean up pending popup tabs when tab is closed
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (pendingPopupTabs[tabId]) {
-    delete pendingPopupTabs[tabId];
-  }
-
-  // Check if the closed tab was the active collection tab
-  chrome.storage.local.get(
-    ["activeCollectionTabId", "collectionState"],
-    (data) => {
-      if (
-        data.activeCollectionTabId === tabId &&
-        data.collectionState === "collecting"
-      ) {
-        // Reset state since the collection tab was closed
-        chrome.storage.local.set({
-          collectionState: "idle",
-          activeCollectionTabId: null,
-        });
-      }
-    }
-  );
-});
-
-// Listen for storage changes to sync state
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === "local") {
-    if (changes.collectionState) {
-      console.log(
-        "Collection state changed:",
-        changes.collectionState.newValue
-      );
-    }
-  }
-});
-
-// Clean up old pending popup tabs periodically
 setInterval(() => {
-  const now = Date.now();
-  Object.keys(pendingPopupTabs).forEach((tabId) => {
-    if (now - pendingPopupTabs[tabId].timestamp > 20000) {
-      delete pendingPopupTabs[tabId];
-    }
-  });
+  CollectionFlowManager.cleanupStalePopupTabs();
 }, 30000);

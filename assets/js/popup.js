@@ -20,6 +20,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const scrollProgressContainer = document.getElementById("scrollProgressContainer");
   const scrollProgressFill = document.getElementById("scrollProgressFill");
   const scrollProgressText = document.getElementById("scrollProgressText");
+  const collectionFlowProgress = document.getElementById("collectionFlowProgress");
 
   const outreachContainer = document.getElementById("outreachContainer");
   const outreachTemplateSelect = document.getElementById("outreachTemplate");
@@ -35,7 +36,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const themeSelect = document.getElementById("themeSelect");
   const scrollSpeedSelect = document.getElementById("scrollSpeedSelect");
-  const autoNavigate = document.getElementById("autoNavigate");
   const preferredMailClientSelect = document.getElementById("preferredMailClient");
   const defaultTemplateSelect = document.getElementById("defaultTemplateSelect");
   const storageUsage = document.getElementById("storageUsage");
@@ -112,32 +112,25 @@ document.addEventListener("DOMContentLoaded", () => {
   /* =============== RESET STATE =============== */
   function resetStateOnOpen() {
     chrome.storage.local.get(
-      ["collectionState", "activeCollectionTabId"],
+      ["collectionFlowState", "activeCollectionTabId"],
       (data) => {
-        if (
-          data.collectionState === "collecting" &&
-          data.activeCollectionTabId
-        ) {
+        const inProgress = isFlowInProgress(data.collectionFlowState);
+        if (inProgress && data.activeCollectionTabId) {
           chrome.tabs.get(data.activeCollectionTabId, (tab) => {
             if (chrome.runtime.lastError || !tab) {
               chrome.storage.local.set({
+                collectionFlowState: COLLECTION_FLOW_STATE.ERROR,
+                collectionError: "Collection interrupted",
                 collectionState: "idle",
-                statusText: "",
                 activeCollectionTabId: null,
+                collectionIntent: null,
               });
-              updateStatus("");
             }
           });
-        } else {
-          chrome.storage.local.set({
-            collectionState: "idle",
-            activeCollectionTabId: null,
-          });
         }
+        loadState();
       }
     );
-
-    loadState();
   }
 
   function startPlaceholderRotation() {
@@ -155,7 +148,6 @@ document.addEventListener("DOMContentLoaded", () => {
       [
         "theme",
         "scrollSpeed",
-        "autoNavigate",
         "includeUnique",
         "preferredMailClient",
         "outreachTemplate",
@@ -163,7 +155,6 @@ document.addEventListener("DOMContentLoaded", () => {
       (data) => {
         themeSelect.value = data.theme || "system";
         scrollSpeedSelect.value = data.scrollSpeed || "2000";
-        autoNavigate.checked = data.autoNavigate !== false;
         includeUniqueCheckbox.checked = data.includeUnique !== false;
         preferredMailClient = data.preferredMailClient || MAIL_CLIENTS.gmail;
         preferredMailClientSelect.value = preferredMailClient;
@@ -202,11 +193,6 @@ document.addEventListener("DOMContentLoaded", () => {
     showToast("Settings saved", "success");
   });
 
-  autoNavigate.addEventListener("change", (e) => {
-    chrome.storage.local.set({ autoNavigate: e.target.checked });
-    showToast("Settings saved", "success");
-  });
-
   includeUniqueCheckbox.addEventListener("change", (e) => {
     chrome.storage.local.set({ includeUnique: e.target.checked });
     showToast("Settings saved", "success");
@@ -237,9 +223,9 @@ document.addEventListener("DOMContentLoaded", () => {
         chrome.storage.local.set({
           theme: "system",
           scrollSpeed: "2000",
-          autoNavigate: true,
           includeUnique: true,
           preferredMailClient: MAIL_CLIENTS.gmail,
+          collectionFlowState: COLLECTION_FLOW_STATE.IDLE,
           outreachTemplates: DEFAULT_OUTREACH_TEMPLATES,
           outreachTemplate: "jobApplication",
         });
@@ -259,6 +245,8 @@ document.addEventListener("DOMContentLoaded", () => {
         "keywords",
         "scrollCount",
         "excludeKeywords",
+        "collectionFlowState",
+        "collectionError",
         "collectionState",
         "collectedEmails",
         "activeCollectionTabId",
@@ -268,6 +256,7 @@ document.addEventListener("DOMContentLoaded", () => {
         "scrollProgress",
         "preferredMailClient",
         "includeUnique",
+        "collectionCompleteToast",
       ],
       (data) => {
         if (data.keywords) keywordsInput.value = data.keywords;
@@ -283,6 +272,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (data.includeUnique !== undefined) {
           includeUniqueCheckbox.checked = data.includeUnique;
+        }
+
+        let flowState =
+          data.collectionFlowState || COLLECTION_FLOW_STATE.IDLE;
+        if (
+          !data.collectionFlowState &&
+          data.collectionState === "collecting"
+        ) {
+          flowState = COLLECTION_FLOW_STATE.COLLECTING;
         }
 
         loadOutreachTemplatesAndRefreshUI(() => {
@@ -305,6 +303,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
           chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             const activeTab = tabs?.[0];
+            currentTabId = activeTab?.id || null;
+            currentTabUrl = activeTab?.url || "";
+
             if (
               activeTab &&
               data.collectedEmails?.length &&
@@ -312,22 +313,27 @@ document.addEventListener("DOMContentLoaded", () => {
             ) {
               collectedEmails = data.collectedEmails;
               displayEmails(collectedEmails);
-            } else {
+            } else if (flowState !== COLLECTION_FLOW_STATE.COMPLETED) {
               hideResults();
             }
 
+            renderCollectionFlow(
+              flowState,
+              data.collectionError || "",
+              data.scrollProgress
+            );
+
             if (
-              data.collectionState === "collecting" &&
-              data.activeCollectionTabId === activeTab?.id
+              flowState === COLLECTION_FLOW_STATE.WAITING_FOR_PAGE ||
+              flowState === COLLECTION_FLOW_STATE.NAVIGATING_TO_SEARCH ||
+              flowState === COLLECTION_FLOW_STATE.OPENING_LINKEDIN
             ) {
-              setButtonState("collecting");
-              if (data.scrollProgress) {
-                showScrollProgress();
-                updateScrollProgress(data.scrollProgress);
-              }
-            } else {
-              setButtonState("idle");
-              hideScrollProgress();
+              chrome.runtime.sendMessage({ action: "resumeCollectionFlow" });
+            }
+
+            if (data.collectionCompleteToast) {
+              showToast("Collection complete", "success");
+              chrome.storage.local.set({ collectionCompleteToast: false });
             }
           });
         });
@@ -345,67 +351,184 @@ document.addEventListener("DOMContentLoaded", () => {
       chrome.storage.local.set({ currentTabUrl });
 
       chrome.storage.local.get(
-        ["activeCollectionTabId", "collectionState"],
+        ["collectionFlowState", "collectedEmails", "activeCollectionTabId"],
         (data) => {
           if (
-            data.activeCollectionTabId !== currentTabId ||
-            data.collectionState !== "collecting"
+            data.collectionFlowState === COLLECTION_FLOW_STATE.COMPLETED &&
+            data.collectedEmails?.length &&
+            data.activeCollectionTabId === tab.id
           ) {
-            updateStatus("");
+            collectedEmails = data.collectedEmails;
+            displayEmails(collectedEmails);
           }
+          renderCollectionFlow(
+            data.collectionFlowState || COLLECTION_FLOW_STATE.IDLE,
+            "",
+            null
+          );
         }
       );
-
-      updateButtonBasedOnUrl(currentTabUrl);
     });
   }
 
-  function updateButtonBasedOnUrl(url) {
-    if (!url.includes("linkedin.com")) {
-      collectButton.textContent = "Open LinkedIn";
-      collectButton.disabled = false;
-    } else if (url.includes("linkedin.com/search/results/content")) {
-      collectButton.textContent = "Collect Emails";
-      collectButton.disabled = false;
+  function setCollectButtonInProgress(inProgress) {
+    if (inProgress) {
+      collectButton.textContent = "Collecting...";
+      collectButton.disabled = true;
     } else {
-      collectButton.textContent = "Navigate to Search";
+      collectButton.textContent = "Collect";
       collectButton.disabled = false;
     }
   }
 
-  function setButtonState(state) {
-    switch (state) {
-      case "collecting":
-        collectButton.textContent = "Collecting...";
-        collectButton.disabled = true;
-        break;
-      case "completed":
-      case "idle":
-      default:
-        updateButtonBasedOnUrl(currentTabUrl);
-        collectButton.disabled = false;
-        break;
+  function getFlowStepStatuses(flowState) {
+    const afterOpening = [
+      COLLECTION_FLOW_STATE.NAVIGATING_TO_SEARCH,
+      COLLECTION_FLOW_STATE.WAITING_FOR_PAGE,
+      COLLECTION_FLOW_STATE.PREPARING_COLLECTION,
+      COLLECTION_FLOW_STATE.COLLECTING,
+      COLLECTION_FLOW_STATE.COMPLETED,
+    ];
+    const afterLoading = [
+      COLLECTION_FLOW_STATE.COLLECTING,
+      COLLECTION_FLOW_STATE.COMPLETED,
+    ];
+
+    return {
+      opening:
+        flowState === COLLECTION_FLOW_STATE.OPENING_LINKEDIN
+          ? "active"
+          : afterOpening.includes(flowState)
+            ? "done"
+            : "pending",
+      loading: [
+        COLLECTION_FLOW_STATE.NAVIGATING_TO_SEARCH,
+        COLLECTION_FLOW_STATE.WAITING_FOR_PAGE,
+        COLLECTION_FLOW_STATE.PREPARING_COLLECTION,
+      ].includes(flowState)
+        ? "active"
+        : afterLoading.includes(flowState)
+          ? "done"
+          : "pending",
+      collecting:
+        flowState === COLLECTION_FLOW_STATE.COLLECTING
+          ? "active"
+          : flowState === COLLECTION_FLOW_STATE.COMPLETED
+            ? "done"
+            : "pending",
+      complete:
+        flowState === COLLECTION_FLOW_STATE.COMPLETED ? "done" : "pending",
+    };
+  }
+
+  function renderCollectionFlow(flowState, errorMessage, scrollProgress) {
+    const inProgress = isFlowInProgress(flowState);
+    setCollectButtonInProgress(inProgress);
+
+    if (
+      flowState === COLLECTION_FLOW_STATE.IDLE ||
+      flowState === COLLECTION_FLOW_STATE.ERROR
+    ) {
+      collectionFlowProgress.classList.add("hidden");
+    } else {
+      collectionFlowProgress.classList.remove("hidden");
+      const statuses = getFlowStepStatuses(flowState);
+
+      collectionFlowProgress.querySelectorAll(".flow-step").forEach((stepEl) => {
+        const step = stepEl.dataset.step;
+        const status = statuses[step] || "pending";
+        stepEl.className = `flow-step flow-step-${status}`;
+
+        const iconEl = stepEl.querySelector(".flow-step-icon");
+        iconEl.innerHTML = "";
+        if (status === "done") {
+          iconEl.appendChild(renderIcon(Icons.check));
+        }
+      });
+    }
+
+    if (flowState === COLLECTION_FLOW_STATE.COLLECTING) {
+      showScrollProgress();
+      if (scrollProgress) {
+        updateScrollProgress(scrollProgress);
+      }
+    } else {
+      hideScrollProgress();
+    }
+
+    if (flowState === COLLECTION_FLOW_STATE.ERROR && errorMessage) {
+      updateStatus(errorMessage);
+    } else if (flowState !== COLLECTION_FLOW_STATE.ERROR) {
+      updateStatus("");
     }
   }
 
-  function processKeywords(input) {
-    const keywords = input
-      .split(",")
-      .map((k) => k.trim())
-      .filter(Boolean);
+  function handleCollectionStorageChanges(changes) {
+    if (changes.collectionFlowState) {
+      const flowState = changes.collectionFlowState.newValue;
+      chrome.storage.local.get(
+        ["collectionError", "scrollProgress", "collectedEmails", "activeCollectionTabId"],
+        (data) => {
+          renderCollectionFlow(
+            flowState,
+            data.collectionError || "",
+            data.scrollProgress
+          );
 
-    if (keywords.length === 0) return "";
+          if (flowState === COLLECTION_FLOW_STATE.COMPLETED) {
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+              const activeTab = tabs?.[0];
+              if (
+                data.collectedEmails?.length &&
+                data.activeCollectionTabId === activeTab?.id
+              ) {
+                collectedEmails = data.collectedEmails;
+                displayEmails(collectedEmails);
+              } else if (changes.collectionNoEmails?.newValue) {
+                updateStatus("No emails found on this page.");
+              }
+              chrome.storage.local.set({ collectionNoEmails: false });
+            });
+          }
+        }
+      );
+    }
 
-    return keywords.map((k) => `"${k}"`).join(" AND ");
-  }
+    if (changes.collectedEmails?.newValue?.length) {
+      chrome.storage.local.get(["activeCollectionTabId", "collectionFlowState"], (data) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (
+            data.collectionFlowState === COLLECTION_FLOW_STATE.COMPLETED &&
+            data.activeCollectionTabId === tabs[0]?.id
+          ) {
+            collectedEmails = changes.collectedEmails.newValue;
+            displayEmails(collectedEmails);
+          }
+        });
+      });
+    }
 
-  function getCurrentSearchKeywords(url) {
-    try {
-      const urlObj = new URL(url);
-      const keywords = urlObj.searchParams.get("keywords");
-      return keywords ? decodeURIComponent(keywords) : "";
-    } catch (e) {
-      return "";
+    if (changes.collectionCompleteToast?.newValue) {
+      showToast("Collection complete", "success");
+      chrome.storage.local.set({ collectionCompleteToast: false });
+    }
+
+    if (changes.collectionNoEmails?.newValue) {
+      updateStatus("No emails found on this page.");
+      chrome.storage.local.set({ collectionNoEmails: false });
+    }
+
+    if (changes.scrollProgress) {
+      chrome.storage.local.get(["collectionFlowState"], (data) => {
+        if (data.collectionFlowState === COLLECTION_FLOW_STATE.COLLECTING) {
+          showScrollProgress();
+          updateScrollProgress(changes.scrollProgress.newValue);
+        }
+      });
+    }
+
+    if (changes.collectionError?.newValue) {
+      updateStatus(changes.collectionError.newValue);
     }
   }
 
@@ -441,257 +564,46 @@ document.addEventListener("DOMContentLoaded", () => {
   /* =============== COLLECT EMAILS =============== */
   function handleCollect() {
     const keywords = keywordsInput.value.trim();
-    const scrollCount = parseInt(scrollCountInput.value || "20");
+    const scrollCount = parseInt(scrollCountInput.value || "20", 10);
     const excludeKeywords = excludeKeywordsInput.value.trim();
-
-    if (!keywords) {
-      updateStatus("Please enter search keywords!");
-      return;
-    }
 
     hideResults();
     collectedEmails = [];
-    chrome.storage.local.set({ collectedEmails: [] });
-
-    const processedKeywords = processKeywords(keywords);
-
-    chrome.storage.local.set({
-      keywords,
-      scrollCount,
-      excludeKeywords,
-    });
 
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const currentTab = tabs?.[0];
-      const url = currentTab?.url || "";
+      const activeTab = tabs?.[0];
 
-      chrome.storage.local.get(["autoNavigate"], (data) => {
-        const shouldAutoNavigate = data.autoNavigate !== false;
-        const searchUrl = `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(
-          processedKeywords
-        )}&origin=GLOBAL_SEARCH_HEADER&sortBy=date_posted`;
-
-        const currentSearchKeywords = getCurrentSearchKeywords(url);
-        const isOnLinkedInSearch = url.includes(
-          "linkedin.com/search/results/content"
-        );
-        const keywordsMatch = currentSearchKeywords === processedKeywords;
-
-        if (!url.includes("linkedin.com")) {
-          if (shouldAutoNavigate) {
-            chrome.tabs.create({ url: searchUrl, active: true }, (newTab) => {
-              chrome.runtime.sendMessage({
-                action: "openPopupOnTabReady",
-                tabId: newTab.id,
-              });
-            });
-          } else {
-            updateStatus("LinkedIn page required. Please navigate manually.");
-          }
-          return;
-        }
-
-        if (isOnLinkedInSearch && !keywordsMatch) {
-          if (shouldAutoNavigate) {
-            chrome.tabs.sendMessage(
-              currentTab.id,
-              {
-                action: "updateSearchInput",
-                keywords: processedKeywords,
-              },
-              (response) => {
-                if (
-                  chrome.runtime.lastError ||
-                  !response ||
-                  !response.success
-                ) {
-                  chrome.tabs.update(currentTab.id, { url: searchUrl }, () => {
-                    const listener = (tabId, changeInfo) => {
-                      if (
-                        tabId === currentTab.id &&
-                        changeInfo.status === "complete"
-                      ) {
-                        chrome.tabs.onUpdated.removeListener(listener);
-                        setTimeout(() => {
-                          chrome.tabs.query(
-                            { active: true, currentWindow: true },
-                            (newTabs) => {
-                              if (newTabs[0]) {
-                                currentTabUrl = newTabs[0].url;
-                                updateButtonBasedOnUrl(currentTabUrl);
-                              }
-                            }
-                          );
-                        }, 500);
-                      }
-                    };
-                    chrome.tabs.onUpdated.addListener(listener);
-                    setTimeout(() => {
-                      chrome.tabs.onUpdated.removeListener(listener);
-                    }, 15000);
-                  });
-                } else {
-                  const listener = (tabId, changeInfo) => {
-                    if (
-                      tabId === currentTab.id &&
-                      changeInfo.status === "complete"
-                    ) {
-                      chrome.tabs.onUpdated.removeListener(listener);
-                      setTimeout(() => {
-                        chrome.tabs.query(
-                          { active: true, currentWindow: true },
-                          (newTabs) => {
-                            if (newTabs[0]) {
-                              currentTabUrl = newTabs[0].url;
-                              updateButtonBasedOnUrl(currentTabUrl);
-                              startEmailCollection(
-                                newTabs[0].id,
-                                scrollCount,
-                                excludeKeywords
-                              );
-                            }
-                          }
-                        );
-                      }, 1500);
-                    }
-                  };
-                  chrome.tabs.onUpdated.addListener(listener);
-                  setTimeout(() => {
-                    chrome.tabs.onUpdated.removeListener(listener);
-                  }, 15000);
-                }
-              }
-            );
-          } else {
-            updateStatus("Please navigate to new search manually.");
-          }
-          return;
-        }
-
-        if (!isOnLinkedInSearch) {
-          if (shouldAutoNavigate) {
-            chrome.tabs.update(currentTab.id, { url: searchUrl }, () => {
-              const listener = (tabId, changeInfo) => {
-                if (
-                  tabId === currentTab.id &&
-                  changeInfo.status === "complete"
-                ) {
-                  chrome.tabs.onUpdated.removeListener(listener);
-                  setTimeout(() => {
-                    chrome.tabs.query(
-                      { active: true, currentWindow: true },
-                      (newTabs) => {
-                        if (newTabs[0]) {
-                          currentTabUrl = newTabs[0].url;
-                          updateButtonBasedOnUrl(currentTabUrl);
-                        }
-                      }
-                    );
-                  }, 500);
-                }
-              };
-              chrome.tabs.onUpdated.addListener(listener);
-              setTimeout(() => {
-                chrome.tabs.onUpdated.removeListener(listener);
-              }, 15000);
-            });
-          } else {
-            updateStatus("Please navigate to search manually.");
-          }
-          return;
-        }
-
-        startEmailCollection(currentTab.id, scrollCount, excludeKeywords);
-      });
-    });
-  }
-
-  function startEmailCollection(tabId, scrollCount, excludeKeywords) {
-    setButtonState("collecting");
-    updateStatus("");
-    showScrollProgress();
-    updateScrollProgress({ current: 0, total: scrollCount, phase: "scrolling" });
-
-    chrome.storage.local.set({
-      collectionState: "collecting",
-      activeCollectionTabId: tabId,
-    });
-
-    chrome.storage.local.get(["scrollSpeed"], (speedData) => {
-      const scrollSpeed = parseInt(speedData.scrollSpeed || "2000");
-
-      chrome.scripting.executeScript(
+      chrome.runtime.sendMessage(
         {
-          target: { tabId: tabId },
-          files: ["assets/js/content.js"],
+          action: "startSmartCollect",
+          keywords,
+          scrollCount,
+          excludeKeywords,
+          includeUnique: includeUniqueCheckbox.checked,
+          tabId: activeTab?.id,
+          tabUrl: activeTab?.url || "",
+          windowId: activeTab?.windowId,
         },
-        () => {
+        (response) => {
           if (chrome.runtime.lastError) {
-            updateStatus("Error: " + chrome.runtime.lastError.message);
-            setButtonState("idle");
-            hideScrollProgress();
-            chrome.storage.local.set({
-              collectionState: "idle",
-              activeCollectionTabId: null,
-            });
-            chrome.storage.local.remove("scrollProgress");
+            updateStatus("Communication error: " + chrome.runtime.lastError.message);
             return;
           }
-
-          setTimeout(() => {
-            chrome.tabs.sendMessage(
-              tabId,
-              {
-                action: "collectEmails",
-                scrollCount,
-                scrollSpeed,
-                excludeKeywords: excludeKeywords
-                  .split(",")
-                  .map((k) => k.trim())
-                  .filter(Boolean),
-                includeUnique: includeUniqueCheckbox.checked,
-              },
-              (response) => {
-                if (chrome.runtime.lastError) {
-                  updateStatus(
-                    "Communication error: " + chrome.runtime.lastError.message
-                  );
-                  setButtonState("idle");
-                  hideScrollProgress();
-                  chrome.storage.local.set({
-                    collectionState: "idle",
-                    activeCollectionTabId: null,
-                  });
-                  chrome.storage.local.remove("scrollProgress");
-                  return;
-                }
-
-                hideScrollProgress();
-
-                if (response && response.emails && response.emails.length > 0) {
-                  collectedEmails = response.emails;
-
-                  chrome.storage.local.set({
-                    collectedEmails,
-                    collectionState: "completed",
-                    activeCollectionTabId: tabId,
-                  });
-
-                  displayEmails(collectedEmails);
-                  updateStatus("");
-                  saveToHistory(keywordsInput.value.trim(), collectedEmails);
-                } else {
-                  updateStatus("No emails found on this page.");
-                  chrome.storage.local.set({
-                    collectionState: "idle",
-                    activeCollectionTabId: null,
-                  });
-                }
-
-                setButtonState("completed");
-              }
-            );
-          }, 800);
+          if (!response?.success) {
+            updateStatus(response?.error || "Unable to start collection");
+            return;
+          }
+          updateStatus("");
+          chrome.storage.local.get(
+            ["collectionFlowState", "collectionError", "scrollProgress"],
+            (data) => {
+              renderCollectionFlow(
+                data.collectionFlowState || COLLECTION_FLOW_STATE.IDLE,
+                data.collectionError || "",
+                data.scrollProgress
+              );
+            }
+          );
         }
       );
     });
@@ -713,27 +625,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /* =============== HISTORY =============== */
-  function saveToHistory(keywords, emails) {
-    const historyItem = {
-      id: Date.now(),
-      date: new Date().toISOString(),
-      keywords: keywords,
-      emails: emails,
-      count: emails.length,
-    };
-
-    chrome.storage.local.get(["history"], (data) => {
-      const history = data.history || [];
-      history.unshift(historyItem);
-
-      if (history.length > 50) {
-        history.splice(50);
-      }
-
-      chrome.storage.local.set({ history });
-    });
-  }
-
   function loadHistory() {
     chrome.storage.local.get(["history"], (data) => {
       const history = data.history || [];
@@ -1202,22 +1093,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function setupStorageListener() {
     chrome.storage.onChanged.addListener((changes, namespace) => {
       if (namespace !== "local") return;
-
-      if (changes.scrollProgress) {
-        chrome.storage.local.get(["collectionState"], (data) => {
-          if (data.collectionState === "collecting") {
-            showScrollProgress();
-            updateScrollProgress(changes.scrollProgress.newValue);
-          }
-        });
-      }
-
-      if (
-        changes.collectionState &&
-        changes.collectionState.newValue !== "collecting"
-      ) {
-        hideScrollProgress();
-      }
+      handleCollectionStorageChanges(changes);
     });
   }
 
@@ -1246,31 +1122,6 @@ document.addEventListener("DOMContentLoaded", () => {
     emailList.textContent = emails.join("\n");
     applySelectedTemplate(true);
   }
-
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status === "complete") {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id === tabId) {
-          currentTabUrl = tab.url;
-          currentTabId = tab.id;
-          chrome.storage.local.set({ currentTabUrl });
-          updateButtonBasedOnUrl(tab.url);
-
-          chrome.storage.local.get(
-            ["activeCollectionTabId", "collectionState"],
-            (data) => {
-              if (
-                data.activeCollectionTabId !== tabId ||
-                data.collectionState !== "collecting"
-              ) {
-                updateStatus("");
-              }
-            }
-          );
-        }
-      });
-    }
-  });
 
   chrome.tabs.onActivated.addListener(() => {
     checkCurrentTab();

@@ -38,8 +38,115 @@
       const success = updateLinkedInSearch(request.keywords);
       sendResponse({ success: success });
       return true;
+    } else if (request.action === "checkSearchPageReady") {
+      sendResponse(checkSearchPageReady(request.keywords));
+      return true;
     }
   });
+
+  function getUrlSearchKeywords() {
+    try {
+      const params = new URL(window.location.href).searchParams;
+      const keywords = params.get("keywords");
+      if (!keywords) return "";
+      return decodeURIComponent(keywords.replace(/\+/g, " "));
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function normalizeKeywordsForComparison(keywords) {
+    if (!keywords) return [];
+    return keywords
+      .replace(/"/g, "")
+      .replace(/\s+AND\s+/gi, ",")
+      .split(",")
+      .map((k) => k.trim().toLowerCase())
+      .filter(Boolean)
+      .sort();
+  }
+
+  function keywordsMatch(urlKeywords, processedKeywords) {
+    const fromUrl = normalizeKeywordsForComparison(urlKeywords);
+    const expected = normalizeKeywordsForComparison(processedKeywords);
+    if (fromUrl.length === 0 || expected.length === 0) return false;
+    if (fromUrl.length !== expected.length) return false;
+    return fromUrl.every((k, i) => k === expected[i]);
+  }
+
+  function isSearchPageDomReady() {
+    const loaders = document.querySelectorAll(
+      '.artdeco-loader, [aria-label="Loading"], .search-results__loader, .search-results__loader-state'
+    );
+    const hasVisibleLoader = [...loaders].some(
+      (el) => el.offsetParent !== null || el.getClientRects().length > 0
+    );
+    if (hasVisibleLoader) return false;
+
+    const resultSelectors = [
+      ".feed-shared-update-v2",
+      "[data-chameleon-result-urn]",
+      ".reusable-search__result-container",
+      ".search-marvel-srp",
+      ".search-results-container li",
+      'div[data-finite-scroll-hotkey-context] .scaffold-finite-scroll__content > *',
+      "main article",
+      "main [data-urn]",
+      ".entity-result",
+      ".update-components-actor",
+      ".feed-shared-actor",
+    ];
+
+    for (const sel of resultSelectors) {
+      if (document.querySelector(sel)) return true;
+    }
+
+    const emptyState = document.querySelector(
+      ".search-no-results-placeholder, .search-reusables__no-results"
+    );
+    if (emptyState) return true;
+
+    const main = document.querySelector("main");
+    if (main && main.innerText.trim().length > 50) return true;
+
+    return document.readyState === "complete" && document.body.innerText.length > 500;
+  }
+
+  function getSearchInputKeywords() {
+    const searchInput = document.querySelector(
+      ".search-global-typeahead__input"
+    );
+    if (!searchInput?.value) return "";
+    return searchInput.value.trim();
+  }
+
+  function checkSearchPageReady(expectedKeywords, pollCount = 0) {
+    const url = window.location.href;
+    if (!url.includes("linkedin.com/search/results/content")) {
+      return { ready: false, keywordsMatch: false, domReady: false };
+    }
+
+    const urlKeywords = getUrlSearchKeywords();
+    const inputKeywords = getSearchInputKeywords();
+    const keywordsOk =
+      keywordsMatch(urlKeywords, expectedKeywords) ||
+      keywordsMatch(inputKeywords, expectedKeywords);
+    const domReady = isSearchPageDomReady();
+    const pageSettled =
+      document.readyState === "complete" || document.readyState === "interactive";
+
+    // After a few polls, keywords on the search URL are enough — DOM selectors vary
+    const ready =
+      keywordsOk &&
+      pageSettled &&
+      (domReady || pollCount >= 2);
+
+    return {
+      ready,
+      keywordsMatch: keywordsOk,
+      domReady,
+    };
+  }
 
   function updateLinkedInSearch(keywords) {
     try {
@@ -280,5 +387,80 @@
       const trimmedKeyword = keyword.trim();
       return trimmedKeyword && email.includes(trimmedKeyword);
     });
+  }
+
+  const FLOW_WATCH_STATES = new Set([
+    "WAITING_FOR_PAGE",
+    "OPENING_LINKEDIN",
+    "NAVIGATING_TO_SEARCH",
+  ]);
+  const FLOW_WATCH_INTERVAL_MS = 1500;
+  let flowWatchTimer = null;
+  let flowWatchPolls = 0;
+
+  function stopFlowWatch() {
+    if (flowWatchTimer) {
+      clearInterval(flowWatchTimer);
+      flowWatchTimer = null;
+    }
+    flowWatchPolls = 0;
+  }
+
+  function startFlowWatch(expectedKeywords) {
+    stopFlowWatch();
+
+    const tick = () => {
+      flowWatchPolls += 1;
+      const status = checkSearchPageReady(expectedKeywords, flowWatchPolls);
+      if (!status.ready) return;
+
+      if (flowWatchTimer) {
+        clearInterval(flowWatchTimer);
+        flowWatchTimer = null;
+      }
+
+      chrome.runtime.sendMessage({ action: "searchPageReady" }, (response) => {
+        if (chrome.runtime.lastError || !response?.handled) {
+          flowWatchTimer = setInterval(tick, FLOW_WATCH_INTERVAL_MS);
+          return;
+        }
+        stopFlowWatch();
+      });
+    };
+
+    tick();
+    flowWatchTimer = setInterval(tick, FLOW_WATCH_INTERVAL_MS);
+  }
+
+  function maybeStartFlowWatch() {
+    chrome.storage.local.get(
+      ["collectionFlowState", "collectionIntent"],
+      (data) => {
+        if (!FLOW_WATCH_STATES.has(data.collectionFlowState)) {
+          stopFlowWatch();
+          return;
+        }
+
+        const keywords = data.collectionIntent?.processedKeywords;
+        if (!keywords || !window.location.href.includes("linkedin.com")) {
+          return;
+        }
+
+        startFlowWatch(keywords);
+      }
+    );
+  }
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.collectionFlowState || changes.collectionIntent || changes.collectionWatchToken) {
+      maybeStartFlowWatch();
+    }
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", maybeStartFlowWatch);
+  } else {
+    maybeStartFlowWatch();
   }
 })();

@@ -22,7 +22,7 @@ All data processing happens locally in the browser. ReachIn does not send or sto
 - Built-in history of previous collections
 - One-click copy to clipboard
 - Outreach generator with templates and multi-client draft composer (Gmail, Outlook, mailto — local-only, no APIs)
-- SVG icon system with toast notifications for action feedback
+- One-click smart collection: enter keywords, click Collect once — navigation and collection run in background
 - Light, dark, and system themes
 - Fully local data storage (no external APIs)
 

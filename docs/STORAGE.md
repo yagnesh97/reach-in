@@ -24,7 +24,6 @@ erDiagram
   SETTINGS {
     string theme "system|light|dark"
     string scrollSpeed "1000|2000|3000"
-    boolean autoNavigate
     boolean includeUnique
     string preferredMailClient "gmail|outlook|mailto"
     string outreachTemplate "jobApplication|networking|founderIntroduction|partnership"
@@ -41,7 +40,10 @@ erDiagram
   }
 
   SESSION {
-    string collectionState "idle|collecting|completed"
+    string collectionFlowState "IDLE|OPENING_LINKEDIN|...|ERROR"
+    object collectionIntent
+    string collectionError
+    string collectionState "idle|collecting|completed (legacy sync)"
     number activeCollectionTabId
     string currentTabUrl
     string keywords
@@ -106,18 +108,9 @@ Applied via `document.body.setAttribute("data-theme", ...)` and CSS variables in
 
 Controls interval between scroll steps in `content.js:scrollAndExtract()`.
 
-#### `autoNavigate`
+#### `autoNavigate` (removed)
 
-| Property | Value |
-|----------|-------|
-| **Type** | `boolean` |
-| **Default** | `true` (set on install by `background.js:18`) |
-| **Written by** | `popup.js` (settings checkbox), `background.js` (install default) |
-| **Read by** | `popup.js` → `handleCollect()` navigation decisions |
-| **Lifecycle** | Persistent |
-| **Retention** | Indefinite |
-
-When `false`, user must manually navigate to LinkedIn search before collecting.
+**Removed in Smart Collect phase.** Collection always navigates automatically via `CollectionFlowManager`. Legacy installs may still have the key in storage; it is ignored.
 
 #### `includeUnique`
 
@@ -223,29 +216,43 @@ Template defaults are seeded from `assets/js/outreach-templates.js` (`DEFAULT_OU
 
 ### Session Keys
 
-#### `collectionState`
+#### `collectionFlowState`
+
+| Property | Value |
+|----------|-------|
+| **Type** | `string` |
+| **Values** | `IDLE`, `OPENING_LINKEDIN`, `NAVIGATING_TO_SEARCH`, `WAITING_FOR_PAGE`, `PREPARING_COLLECTION`, `COLLECTING`, `COMPLETED`, `ERROR` |
+| **Default** | `IDLE` |
+| **Written by** | `collection-flow-manager.js` (background) |
+| **Read by** | `popup.js` (button, stepper, progress UI) |
+| **Lifecycle** | Transient during smart collect flow |
+
+#### `collectionIntent`
+
+| Property | Value |
+|----------|-------|
+| **Type** | `object` |
+| **Fields** | `keywords`, `processedKeywords`, `scrollCount`, `excludeKeywords`, `includeUnique`, `targetTabId`, `searchUrl`, `startedAt` |
+| **Written by** | `CollectionFlowManager.startSmartCollect()` |
+| **Read by** | Background orchestrator on tab updates |
+| **Lifecycle** | Cleared on `COMPLETED` or `ERROR` |
+
+#### `collectionError`
+
+| Property | Value |
+|----------|-------|
+| **Type** | `string` |
+| **Written by** | `CollectionFlowManager.fail()` |
+| **Read by** | `popup.js` → `#statusText` |
+
+#### `collectionState` (legacy sync)
 
 | Property | Value |
 |----------|-------|
 | **Type** | `string` |
 | **Values** | `"idle"`, `"collecting"`, `"completed"` |
-| **Default** | `"idle"` |
-| **Written by** | `popup.js`, `background.js` |
-| **Read by** | `popup.js` (button state), `background.js` (tab lifecycle) |
-| **Lifecycle** | Transient during collection; reset on tab close/refresh |
-| **Retention** | Until next collection or cleanup |
-
-State transitions:
-
-```mermaid
-stateDiagram-v2
-  [*] --> idle
-  idle --> collecting: startEmailCollection
-  collecting --> completed: emails found
-  collecting --> idle: no emails / error / tab closed
-  completed --> idle: new collection / popup reset
-  collecting --> idle: tab refresh background.js
-```
+| **Written by** | `CollectionFlowManager` (kept for compatibility) |
+| **Read by** | Legacy migration in `popup.js` |
 
 #### `activeCollectionTabId`
 
@@ -273,7 +280,7 @@ stateDiagram-v2
 | Property | Value |
 |----------|-------|
 | **Type** | `string` (raw comma-separated input) |
-| **Written by** | `popup.js` → `handleCollect()` |
+| **Written by** | `popup.js` → `handleCollect()` (form save), `CollectionFlowManager` |
 | **Read by** | `popup.js` → `loadState()` |
 | **Lifecycle** | Updated on each collect attempt |
 | **Retention** | Until next collect or clear |
@@ -284,7 +291,7 @@ stateDiagram-v2
 |----------|-------|
 | **Type** | `string` or `number` |
 | **Default** | `"20"` (HTML input default) |
-| **Written by** | `popup.js` → `handleCollect()` |
+| **Written by** | `popup.js` → `handleCollect()` (form save), `CollectionFlowManager` |
 | **Read by** | `popup.js` → `loadState()` |
 | **Lifecycle** | Updated on each collect attempt |
 | **Retention** | Until next collect or clear |
@@ -294,7 +301,7 @@ stateDiagram-v2
 | Property | Value |
 |----------|-------|
 | **Type** | `string` (comma-separated) |
-| **Written by** | `popup.js` → `handleCollect()` |
+| **Written by** | `popup.js` → `handleCollect()` (form save), `CollectionFlowManager` |
 | **Read by** | `popup.js` → `loadState()`; parsed and sent to content script |
 | **Lifecycle** | Updated on each collect attempt |
 | **Retention** | Until next collect or clear |
@@ -368,7 +375,7 @@ flowchart TD
 |----------|-------|
 | **Type** | `HistoryItem[]` |
 | **Max entries** | 50 |
-| **Written by** | `popup.js` → `saveToHistory()`, `deleteHistoryItem()` |
+| **Written by** | `CollectionFlowManager.complete()` |
 | **Read by** | `popup.js` → `loadHistory()` |
 | **Lifecycle** | Persistent across sessions |
 | **Retention** | Until deleted individually or cleared via Settings |
@@ -415,9 +422,11 @@ This removes **all keys** including settings, history, cache, and session state.
 |-----|:---:|:---:|:---:|
 | `theme` | W (default) | R/W | — |
 | `scrollSpeed` | W (default) | R/W | — (via message) |
-| `autoNavigate` | W (default) | R/W | — |
 | `includeUnique` | W (default) | R/W | — (via message) |
 | `preferredMailClient` | W (default) | R/W | — |
+| `collectionFlowState` | W (default) | R | W |
+| `collectionIntent` | — | R | W |
+| `collectionError` | — | R | W |
 | `outreachTemplate` | W (default) | R/W | — |
 | `outreachTemplates` | W (seed) | R/W | — |
 | `generatedSubject` | — | R/W | — |

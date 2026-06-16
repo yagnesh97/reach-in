@@ -23,10 +23,11 @@ Engineering reference for the ReachIn Chrome Extension (Manifest V3).
 
 | Component | Responsibility |
 |-----------|----------------|
-| Popup (`popup.js`) | User interface, navigation orchestration, collection lifecycle, history, settings |
+| Popup (`popup.js`) | User interface, storage-driven flow display, history, settings |
 | Content script (`content.js`) | LinkedIn DOM interaction, scrolling, expansion, email extraction |
-| Service worker (`background.js`) | Install defaults, tab lifecycle, popup auto-open, state cleanup |
-| Storage layer | Persist settings, session state, email cache, and history |
+| Service worker (`background.js`) | Install defaults, `CollectionFlowManager` orchestration, tab lifecycle |
+| `collection-flow-manager.js` | Smart collect state machine, navigation, collection start, history save |
+| Storage layer | Persist settings, flow state, session data, email cache, and history |
 
 ---
 
@@ -41,6 +42,7 @@ flowchart TB
 
   subgraph extensionCore [Extension Core]
     SW[background.js Service Worker]
+    CFM[collection-flow-manager.js]
     CS[content.js Content Script]
   end
 
@@ -57,12 +59,13 @@ flowchart TB
   end
 
   User --> PopupUI
-  PopupUI -->|tabs.sendMessage| CS
-  PopupUI -->|runtime.sendMessage| SW
-  PopupUI -->|executeScript| CS
-  PopupUI --> Tabs
+  PopupUI -->|runtime.sendMessage startSmartCollect| SW
+  SW --> CFM
+  CFM -->|tabs.sendMessage| CS
+  CFM --> Tabs
   PopupUI --> Storage
   SW --> Storage
+  CFM --> Storage
   SW --> Tabs
   SW --> Action
   CS --> Storage
@@ -73,13 +76,13 @@ flowchart TB
 
 Entry point: `manifest.json` → `action.default_popup` → `popup.html`.
 
-The popup is the primary orchestrator. It reads/writes storage, queries and navigates tabs, injects the content script, and sends collection commands. It does not touch the LinkedIn DOM directly.
+The popup is the view layer. It reads/writes storage, sends `startSmartCollect` to the background, and renders flow progress from `collectionFlowState`. It does not touch the LinkedIn DOM directly or own navigation logic.
 
 See [`UI_AND_UX.md`](UI_AND_UX.md) for view structure and user flows.
 
 ### Content Scripts
 
-Registered in `manifest.json` for `https://www.linkedin.com/*`. Also re-injected via `chrome.scripting.executeScript` when collection starts (see dual injection below).
+Registered in `manifest.json` for `https://www.linkedin.com/*`. Collection is triggered via `chrome.tabs.sendMessage` from `CollectionFlowManager` (no programmatic re-injection on the collection path).
 
 Responsibilities: scroll page, click expand buttons, extract emails, update LinkedIn search input.
 
@@ -87,13 +90,13 @@ See [`CONTENT_SCRIPT.md`](CONTENT_SCRIPT.md) for DOM interaction details.
 
 ### Service Worker
 
-Single file: `assets/js/background.js`. No persistent background page.
+Single file: `assets/js/background.js`. Loads `collection-utils.js` and `collection-flow-manager.js` via `importScripts`.
 
 Responsibilities:
 - Initialize default settings on install
-- Track pending popup auto-open requests
-- Reset collection state when collection tab closes or refreshes
-- Store `currentTabUrl` on tab navigation complete
+- Handle `startSmartCollect` and `getCollectionFlow` messages
+- Delegate tab events to `CollectionFlowManager`
+- Best-effort popup reopen during active flow
 
 ### Chrome APIs
 
@@ -119,10 +122,17 @@ https://www.linkedin.com/search/results/content/?keywords={processed}&origin=GLO
 flowchart LR
   subgraph popup [Popup Module]
     init[init]
-    handleCollect[handleCollect]
-    startCollection[startEmailCollection]
-    history[saveToHistory / loadHistory]
+    handleCollect[handleCollect message only]
+    renderFlow[renderCollectionFlow]
+    history[loadHistory / deleteHistoryItem]
     settings[loadSettings / applyTheme]
+  end
+
+  subgraph manager [CollectionFlowManager]
+    start[startSmartCollect]
+    onTabUpdated[onTabUpdated]
+    startCollection[startCollection]
+    complete[complete / fail]
   end
 
   subgraph content [Content Script Module]
@@ -133,16 +143,18 @@ flowchart LR
 
   subgraph background [Service Worker Module]
     onInstalled[onInstalled defaults]
-    popupReady[openPopupOnTabReady]
+    messages[onMessage routing]
     tabLifecycle[tabs.onUpdated / onRemoved]
   end
 
-  handleCollect --> startCollection
-  startCollection -->|executeScript + sendMessage| scrollExtract
-  handleCollect -->|sendMessage| updateSearch
+  handleCollect -->|startSmartCollect| start
+  start --> onTabUpdated
+  onTabUpdated --> startCollection
+  startCollection -->|sendMessage| scrollExtract
+  start -->|sendMessage| updateSearch
   scrollExtract --> extract
-  startCollection --> history
-  popupReady --> onInstalled
+  complete --> history
+  tabLifecycle --> onTabUpdated
 ```
 
 ---
@@ -158,7 +170,7 @@ sequenceDiagram
   participant Storage as chrome.storage.local
 
   Chrome->>SW: runtime.onInstalled
-  SW->>Storage: get theme scrollSpeed autoNavigate preferredMailClient includeUnique
+  SW->>Storage: get theme scrollSpeed preferredMailClient includeUnique
   alt Missing defaults
     SW->>Storage: set defaults including preferredMailClient gmail includeUnique true
   end
@@ -186,42 +198,50 @@ sequenceDiagram
 
 `resetStateOnOpen()` verifies the active collection tab still exists; resets state if closed.
 
-### Collection Flow
+### Collection Flow (Smart Collect)
 
 ```mermaid
 sequenceDiagram
   participant User
   participant Popup as popup.js
+  participant SW as background.js
+  participant CFM as CollectionFlowManager
   participant Tabs as chrome.tabs
   participant CS as content.js
   participant Storage as chrome.storage.local
 
-  User->>Popup: Click Collect button
-  Popup->>Popup: handleCollect navigation decision
-  alt On correct search page
-    Popup->>Storage: set collectionState collecting
-    Popup->>Tabs: scripting.executeScript content.js
-    Popup->>CS: sendMessage collectEmails
-    CS->>CS: scrollAndExtract
-    CS->>CS: finishExtraction extractEmails
-    CS-->>Popup: emails array
-    Popup->>Storage: set collectedEmails collectionState completed
-    Popup->>Popup: displayEmails saveToHistory
+  User->>Popup: Click Collect
+  Popup->>SW: startSmartCollect
+  SW->>CFM: startSmartCollect(intent)
+  CFM->>Storage: set collectionFlowState collectionIntent
+  alt Not on LinkedIn or wrong page
+    CFM->>Tabs: create or update search URL
+    CFM->>Storage: OPENING_LINKEDIN / NAVIGATING_TO_SEARCH / WAITING_FOR_PAGE
+    Tabs-->>CFM: onTabUpdated complete
+    CFM->>CS: updateSearchInput or wait for page
   end
+  CFM->>Storage: COLLECTING
+  CFM->>CS: sendMessage collectEmails
+  CS->>CS: scrollAndExtract
+  CS-->>CFM: emails array
+  CFM->>Storage: COMPLETED collectedEmails history
+  Storage-->>Popup: onChanged
+  Popup->>Popup: renderCollectionFlow displayEmails showToast
 ```
 
-Full navigation decision tree in [`BUSINESS_LOGIC.md`](BUSINESS_LOGIC.md).
+Full scenario mapping in [`BUSINESS_LOGIC.md`](BUSINESS_LOGIC.md).
 
 ### Data Persistence
 
 - **Settings**: Written on change; loaded on popup open
-- **Session state**: `collectionState`, `collectedEmails`, `activeCollectionTabId` during collection
-- **History**: Appended on successful collection; capped at 50 entries
+- **Flow state**: `collectionFlowState`, `collectionIntent`, `collectionError` during smart collect
+- **Session state**: `collectedEmails`, `activeCollectionTabId`, `scrollProgress` during collection
+- **History**: Appended in `CollectionFlowManager.complete()`; capped at 50 entries
 - **Email cache**: Updated in content script when `includeUnique` is enabled
 
 ### History Management
 
-`saveToHistory()` prepends a new entry with `id`, `date`, `keywords`, `emails`, and `count`. Entries beyond 50 are truncated. Individual entries can be deleted from the History view.
+`CollectionFlowManager.complete()` prepends a new history entry with `id`, `date`, `keywords`, `emails`, and `count`. Entries beyond 50 are truncated. Individual entries can be deleted from the History view in popup.
 
 ---
 
@@ -231,8 +251,8 @@ Full navigation decision tree in [`BUSINESS_LOGIC.md`](BUSINESS_LOGIC.md).
 
 ReachIn uses two messaging channels:
 
-1. **Popup → Content** via `chrome.tabs.sendMessage` (tab-scoped)
-2. **Popup → Background** via `chrome.runtime.sendMessage` (extension-scoped)
+1. **Popup → Background** via `chrome.runtime.sendMessage` (smart collect orchestration)
+2. **Background → Content** via `chrome.tabs.sendMessage` (collection and search update)
 
 The content script listens via `chrome.runtime.onMessage`. The background listens via `chrome.runtime.onMessage`.
 
@@ -240,10 +260,12 @@ The content script listens via `chrome.runtime.onMessage`. The background listen
 
 | Action | Sender | Receiver | Async | Payload | Response |
 |--------|--------|----------|-------|---------|----------|
-| `collectEmails` | popup | content | Yes (`return true`) | `{ scrollCount, scrollSpeed, excludeKeywords, includeUnique }` | `{ emails: string[] }` |
-| `updateSearchInput` | popup | content | Yes | `{ keywords: string }` | `{ success: boolean }` |
+| `startSmartCollect` | popup | background | Yes | `{ keywords, scrollCount, excludeKeywords, includeUnique }` | `{ success, error? }` |
+| `getCollectionFlow` | popup | background | Yes | — | flow state snapshot |
+| `collectEmails` | background | content | Yes (`return true`) | `{ scrollCount, scrollSpeed, excludeKeywords, includeUnique }` | `{ emails: string[] }` |
+| `updateSearchInput` | background | content | Yes | `{ keywords: string }` | `{ success: boolean }` |
 | `clearCache` | — | content | No | — | `{ success: true }` (unused) |
-| `openPopupOnTabReady` | popup | background | Yes | `{ tabId: number }` | `{ success: true }` |
+| `openPopupOnTabReady` | popup | background | Yes | `{ tabId: number }` | `{ success: true }` (legacy) |
 | `updateState` | — | background | Yes | `{ data: object }` | `{ success: true }` (unused) |
 | `getState` | — | background | Yes | `{ keys?: string[] }` | storage data (unused) |
 
@@ -251,15 +273,12 @@ The content script listens via `chrome.runtime.onMessage`. The background listen
 
 ```mermaid
 sequenceDiagram
-  participant Popup as popup.js
-  participant Scripting as chrome.scripting
+  participant CFM as CollectionFlowManager
   participant CS as content.js
   participant DOM as LinkedIn DOM
 
-  Popup->>Scripting: executeScript content.js
-  Scripting->>CS: Inject script
-  Note over Popup,CS: 800ms delay
-  Popup->>CS: collectEmails
+  CFM->>CS: collectEmails
+  Note over CFM,CS: 1.5s delay + one retry if needed
   loop scrollCount times every scrollSpeed ms
     CS->>DOM: main scrollBy innerHeight
     CS->>DOM: click see-more buttons
@@ -267,17 +286,12 @@ sequenceDiagram
   CS->>DOM: final see-more pass
   Note over CS: 2000ms wait
   CS->>DOM: query mailto links + innerText regex
-  CS-->>Popup: emails
+  CS-->>CFM: emails
 ```
 
-### Dual Content Script Injection
+### Content Script Injection
 
-The content script is injected two ways:
-
-1. **Manifest registration** — auto-injected on every LinkedIn page load
-2. **Programmatic injection** — `chrome.scripting.executeScript` in `startEmailCollection()` at `popup.js:528-532`
-
-The IIFE guard prevents double initialization:
+The content script is injected via manifest registration on every LinkedIn page load. The IIFE guard prevents double initialization:
 
 ```javascript
 if (window.__linkedinEmailCollectorInitialized) {
@@ -285,8 +299,6 @@ if (window.__linkedinEmailCollectorInitialized) {
 }
 window.__linkedinEmailCollectorInitialized = true;
 ```
-
-Programmatic re-injection ensures the script is present even if the manifest injection failed or the page was loaded before extension install.
 
 ---
 
@@ -296,13 +308,13 @@ Programmatic re-injection ensures the script is present even if the manifest inj
 flowchart TD
   Input[User enters keywords scroll count exclusions]
   Input --> Process[processKeywords AND join]
-  Process --> Navigate[Navigation decision 4 cases]
-  Navigate --> Scroll[Content script scroll + expand]
+  Process --> SmartCollect[CollectionFlowManager navigate and collect]
+  SmartCollect --> Scroll[Content script scroll + expand]
   Scroll --> Extract[extractEmails mailto + regex]
   Extract --> Filter[shouldExclude + cachedEmails dedup]
-  Filter --> Display[displayEmails in popup]
+  Filter --> Display[displayEmails in popup via storage.onChanged]
   Display --> Persist[storage.local collectedEmails]
-  Display --> History[saveToHistory max 50]
+  Display --> History[complete saves history max 50]
   Display --> Copy[navigator.clipboard optional]
   Display --> Outreach[Outreach section visible]
   Outreach --> AutoFill[applySelectedTemplate from storage]
@@ -350,9 +362,9 @@ All parameters are `encodeURIComponent`-encoded. No Gmail API, OAuth, or externa
 
 ### `assets/js/popup.js`
 
-**Purpose:** Popup UI controller and collection orchestrator.
+**Purpose:** Popup UI controller (view layer).
 
-**Dependencies:** `popup.html` DOM, Chrome tabs/storage/scripting/runtime APIs, `navigator.clipboard`.
+**Dependencies:** `popup.html` DOM, Chrome storage/runtime APIs, `collection-utils.js`, `navigator.clipboard`.
 
 **Consumers:** User via popup UI.
 
@@ -365,10 +377,8 @@ All parameters are `encodeURIComponent`-encoded. No Gmail API, OAuth, or externa
 | `loadSettings()` / `applyTheme()` | Settings and theme |
 | `loadState()` | Restore form fields and results |
 | `checkCurrentTab()` | Detect active tab URL |
-| `updateButtonBasedOnUrl()` | Set collect button label |
-| `processKeywords()` | Transform comma-separated → AND query |
-| `handleCollect()` | Main collection entry — 4 navigation cases |
-| `startEmailCollection()` | Inject script, send collectEmails message |
+| `handleCollect()` | Validate keywords; send `startSmartCollect` |
+| `renderCollectionFlow()` | Update button, stepper, status from storage |
 | `handleCopy()` | Clipboard copy |
 | `applySelectedTemplate()` | Auto-fill subject/body on template change |
 | `openMailDraft()` | Open compose draft via `buildMailDraftUrl()` |
@@ -378,9 +388,21 @@ All parameters are `encodeURIComponent`-encoded. No Gmail API, OAuth, or externa
 | `saveTemplate()` / `addNewTemplate()` / `deleteTemplate()` / `resetTemplateToDefault()` | Settings template CRUD |
 | `updateScrollProgress()` / `showScrollProgress()` / `hideScrollProgress()` | Collection progress UI |
 | `hideResults()` | Hide results and outreach panels |
-| `saveToHistory()` / `loadHistory()` / `deleteHistoryItem()` | History CRUD |
+| `loadHistory()` / `deleteHistoryItem()` | History CRUD |
 | `switchView()` | Main / History / Settings navigation |
 | `displayEmails()` / `updateStatus()` | UI updates |
+
+### `assets/js/collection-utils.js`
+
+**Purpose:** Shared keyword/URL helpers and `COLLECTION_FLOW_STATE` constants.
+
+**Consumers:** `popup.js`, `collection-flow-manager.js`.
+
+### `assets/js/collection-flow-manager.js`
+
+**Purpose:** Background collection orchestrator (state machine, navigation, `startCollection`, `complete`, `fail`, history save).
+
+**Consumers:** `background.js` via `importScripts`.
 
 ### `assets/js/ui/icons.js`
 
@@ -435,18 +457,17 @@ Runtime templates are stored in `chrome.storage.local` → `outreachTemplates`.
 
 **Dependencies:** Chrome storage/tabs/action/runtime APIs.
 
-**Consumers:** Popup via `chrome.runtime.sendMessage`; Chrome via lifecycle events.
+**Consumers:** Popup via `chrome.runtime.sendMessage`; `CollectionFlowManager` via `importScripts`; Chrome via lifecycle events.
 
-**Public interfaces:** Message actions `openPopupOnTabReady`, `updateState`, `getState`.
+**Public interfaces:** Message actions `startSmartCollect`, `getCollectionFlow`, `openPopupOnTabReady`, `updateState`, `getState`.
 
 | Listener | Purpose |
 |----------|---------|
 | `runtime.onInstalled` | Default settings |
-| `runtime.onMessage` | Popup messages |
-| `tabs.onUpdated` | Popup auto-open, collection state reset, URL tracking |
-| `tabs.onRemoved` | Collection tab cleanup |
+| `runtime.onMessage` | Smart collect and popup messages |
+| `tabs.onUpdated` | Delegated to `CollectionFlowManager` |
+| `tabs.onRemoved` | Flow cleanup on tab close |
 | `storage.onChanged` | Log collection state changes |
-| `setInterval(30s)` | Clean stale pending popup tabs |
 
 ---
 

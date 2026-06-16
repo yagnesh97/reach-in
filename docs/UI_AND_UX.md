@@ -50,22 +50,25 @@ Keywords placeholder rotates every 3 seconds through 8 example queries when inpu
 
 | Element ID | Type | Purpose |
 |------------|------|---------|
-| `#collectButton` | `.btn.btn-primary` | Start collection or navigate (dynamic label) |
+| `#collectButton` | `.btn.btn-primary` | Smart Collect (single click) |
+| `#collectionFlowProgress` | stepper | 4-step flow progress tracker |
 | `#copyButton` | `.btn.btn-icon` + copy SVG | Copy results to clipboard (toast on success) |
 | `#historyButton` | `.btn.btn-icon` + history SVG | Open history view |
 | `#settingsButton` | `.btn.btn-icon` + settings SVG | Open settings view |
 | `#appTitle` | button | Navigate to main view (home icon + "ReachIn") |
 
-**Collect button labels** (set by `updateButtonBasedOnUrl()`):
+**Collect button:** Always labeled **Collect**. Disabled with **Collecting...** during active flow states.
 
-| Condition | Label |
-|-----------|-------|
-| Not on linkedin.com | "Open LinkedIn" |
-| On LinkedIn but not search results | "Navigate to Search" |
-| On search results page | "Collect Emails" |
-| During collection | "Collecting..." (disabled) |
+### Smart Collect Flow
 
-### Results Display
+1. User enters keywords and clicks **Collect** once
+2. Popup sends `startSmartCollect` to background
+3. `CollectionFlowManager` navigates to LinkedIn/search as needed
+4. Collection auto-starts when search page is ready
+5. Progress stepper shows: Opening LinkedIn → Loading Search Results → Collecting Emails → Complete
+6. Results and toast appear on completion; flow survives popup close
+
+### Copy Flow
 
 | Element ID | Purpose |
 |------------|---------|
@@ -116,19 +119,20 @@ Template dropdown is populated from `outreachTemplates` in storage. Changing the
 flowchart TD
   Start[User opens popup]
   Start --> EnterKW[Enter keywords scroll count exclusions]
-  EnterKW --> ClickCollect[Click collect button]
+  EnterKW --> ClickCollect[Click Collect once]
   ClickCollect --> Validate{Keywords empty?}
   Validate -->|Yes| Error[Show Please enter search keywords]
-  Validate -->|No| NavDecision[Navigation decision 4 cases]
-  NavDecision --> Collect[startEmailCollection]
+  Validate -->|No| Message[startSmartCollect to background]
+  Message --> Stepper[Stepper shows flow progress]
+  Stepper --> Collect[Background auto-starts collection]
   Collect --> Progress[Scroll progress bar updates]
   Progress --> Scroll[Content script scrolls and extracts]
   Scroll --> Results{Emails found?}
-  Results -->|Yes| Display[Show results save history]
+  Results -->|Yes| Display[Show results toast]
   Results -->|No| NoEmails[Show No emails found]
 ```
 
-See [`BUSINESS_LOGIC.md`](BUSINESS_LOGIC.md) for navigation decision details.
+Flow continues even if popup closes. Reopening popup restores in-progress UI from storage.
 
 ### Copy Flow
 
@@ -184,6 +188,19 @@ flowchart TD
 | Open Draft, no emails | Status: "Collect emails first" |
 | Open Draft, no content | Status: "Subject and message are required" |
 
+### Flow Stepper
+
+Visible when `collectionFlowState` is not `IDLE`. Hidden on `IDLE`, `COMPLETED`, and `ERROR`.
+
+| Step | Active during | Done after |
+|------|---------------|------------|
+| Opening LinkedIn | `OPENING_LINKEDIN` | state advances |
+| Loading Search Results | `NAVIGATING_TO_SEARCH`, `WAITING_FOR_PAGE`, `PREPARING_COLLECTION` | `COLLECTING` |
+| Collecting Emails | `COLLECTING` | `COMPLETED` |
+| Complete | `COMPLETED` | — |
+
+Icons from `icons.js`: filled check (done), stroke circle (pending), accent dot (active).
+
 ### Scroll Progress
 
 During collection, a progress bar appears below the status text:
@@ -219,7 +236,7 @@ Settings are organized into five card groups:
 | Group | Controls | Storage Keys |
 |-------|----------|--------------|
 | Appearance | Theme | `theme` |
-| Collection | Scroll speed, auto-navigate, unique emails | `scrollSpeed`, `autoNavigate`, `includeUnique` |
+| Collection | Scroll speed, unique emails | `scrollSpeed`, `includeUnique` |
 | Outreach | Mail client, default template, template editor | `preferredMailClient`, `outreachTemplate`, `outreachTemplates` |
 | Storage | Usage display, clear data | — |
 | About | Version, privacy link | — |
@@ -228,7 +245,6 @@ Settings are organized into five card groups:
 |---------|---------|-------------|
 | Theme | `#themeSelect` dropdown | `theme` |
 | Scroll speed | `#scrollSpeedSelect` dropdown | `scrollSpeed` |
-| Auto-navigate | `#autoNavigate` checkbox | `autoNavigate` |
 | Unique emails | `#includeUnique` checkbox | `includeUnique` |
 | Default mail client | `#preferredMailClient` dropdown | `preferredMailClient` |
 | Default template | `#defaultTemplateSelect` dropdown | `outreachTemplate` |
