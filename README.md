@@ -11,6 +11,8 @@ It is designed for job seekers, recruiters, and professionals who want a faster 
 
 All data processing happens locally in the browser. ReachIn does not send or store data on external servers.
 
+**[Install from Chrome Web Store](https://chromewebstore.google.com/detail/reachin/nacijapnefpmnkpooemppnkejcobdhhl)**
+
 ---
 
 ## ✨ Features
@@ -57,7 +59,13 @@ Covers architecture, storage design, content script behavior, business logic, lo
 
 ---
 
-## 🛠️ Installation (Local Development)
+## 🛠️ Installation
+
+### Chrome Web Store
+
+Install the latest release from the [Chrome Web Store](https://chromewebstore.google.com/detail/reachin/nacijapnefpmnkpooemppnkejcobdhhl).
+
+### Local Development
 
 1. Clone the repository
    ```bash
